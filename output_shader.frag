@@ -1,4 +1,5 @@
 #version 130
+#extension GL_ARB_gpu_shader5 : enable // enable inverse() func
 //#include "common.frag"
 
 uniform vec2 u_resolution;
@@ -74,17 +75,388 @@ float smin_exp(float a, float b, float k = 32)
     return -log(max(0.0001,res)) / k;
 }
 
-// TRANSFORMATION -----------------------------------------------------
+// TRANSFORMATION: FAST, BUT HARD TO USE (SOMETIMES) ------------------
 
-// Rotate around a coordinate axis (i.e. in a plane perpendicular to that axis) by angle <a>.
-// Read like this: R(p.xz, a) rotates "x towards z".
-// This is fast if <a> is a compile-time constant and slower (but still practical) if not.
-void pR(inout vec2 p, float a) {
-	p = cos(a)*p + sin(a)*vec2(p.y, -p.x);
+void translatePoint(inout vec3 p, vec3 offset)
+{
+	p = p - offset;
 }
 
-#define scale(func, samplePoint, scaleFactor) (func(samplePoint / scaleFactor) * scaleFactor)
-#define scale3(func, samplePoint, s_x, s_y, s_z) (func(samplePoint / vec3(s_x, s_y, s_z)) * min(s_x, min(s_y, s_z)))
+// Rotate around a coordinate axis (i.e. in a plane perpendicular to that axis) by angle <a>.
+// Read like this: rotatePoint(p.xz, a) rotates "x towards z".
+// This is fast if <a> is a compile-time constant and slower (but still practical) if not.
+void rotatePoint(inout vec2 p, float a) {
+	p = cos(a) * p + sin(a) * vec2(p.y, -p.x);
+}
+
+vec3 rotatePointX(vec3 p, float a)
+{
+	p.yz = cos(a) * p.yz + sin(a) * vec2(p.z, -p.y);
+	return p;
+}
+
+vec3 rotatePointY(vec3 p, float a)
+{
+	p.xz = cos(a) * p.xz + sin(a) * vec2(p.z, -p.x);
+	return p;
+}
+
+vec3 rotatePointZ(vec3 p, float a)
+{
+	p.xy = cos(a) * p.xy + sin(a) * vec2(p.y, -p.x);
+	return p;
+}
+
+#define scaleSDF(func, samplePoint, scaleFactor) (func(samplePoint / scaleFactor) * scaleFactor)
+#define scaleSDF3(func, samplePoint, s_x, s_y, s_z) (func(samplePoint / vec3(s_x, s_y, s_z)) * min(s_x, min(s_y, s_z)))
+
+// TRANSFORMATION: SLOW, BUT EASY TO USE ------------------------------
+
+mat4 rotationX(in float angle_deg)
+{
+	float angle_rad = radians(angle_deg);
+    float c = cos(angle_rad);
+    float s = sin(angle_rad);
+    return mat4(
+        vec4(1, 0, 0, 0),
+        vec4(0, c, -s, 0),
+        vec4(0, s, c, 0),
+        vec4(0, 0, 0, 1)
+    );
+}
+
+mat4 rotationY(in float angle_deg)
+{
+	float angle_rad = radians(angle_deg);
+    float c = cos(angle_rad);
+    float s = sin(angle_rad);
+    return mat4(
+        vec4(c, 0, s, 0),
+        vec4(0, 1, 0, 0),
+        vec4(-s, 0, c, 0),
+        vec4(0, 0, 0, 1)
+    );
+}
+
+mat4 rotationZ(in float angle_deg)
+{
+	float angle_rad = radians(angle_deg);
+    float c = cos(angle_rad);
+    float s = sin(angle_rad);
+    return mat4(
+        vec4(c, -s, 0, 0),
+        vec4(s, c, 0, 0),
+        vec4(0, 0, 1, 0),
+        vec4(0, 0, 0, 1)
+    );
+}
+
+// this function uses inverse!
+//vec3 transform(vec3 sample_point, vec3 pos, vec3 rot, vec3 scale)
+//{
+//	mat4 s = mat4(
+//      vec4(scale.x, 0, 0, 0),
+//      vec4(0, scale.y, 0, 0),
+//      vec4(0, 0, scale.z, 0),
+//      vec4(0, 0, 0, 1));
+//
+//	mat4 t = mat4(
+//      vec4(1, 0, 0, pos.x),
+//      vec4(0, 1, 0, pos.y),
+//      vec4(0, 0, 1, pos.z),
+//      vec4(0, 0, 0, 1));
+//	  
+//	return (vec4(sample_point, 1.0) *
+//		inverse(s * rotationZ(rot.z) * rotationX(rot.x) * rotationY(rot.y) * t)).xyz;
+//}
+
+vec3 transform(in vec3 sample_point, in vec3 pos, in vec3 rot, in vec3 scale)
+{
+	mat4 s = mat4(
+      vec4(1/scale.x, 0, 0, 0),
+      vec4(0, 1/scale.y, 0, 0),
+      vec4(0, 0, 1/scale.z, 0),
+      vec4(0, 0, 0, 1));
+
+	mat4 r_y = rotationY(-rot.y);
+	mat4 r_x = rotationX(-rot.x);
+	mat4 r_z = rotationZ(-rot.z);
+
+	mat4 t = mat4(
+      vec4(1, 0, 0, -pos.x),
+      vec4(0, 1, 0, -pos.y),
+      vec4(0, 0, 1, -pos.z),
+      vec4(0, 0, 0, 1));
+	  
+	return (vec4(sample_point, 1.0) * t * r_y * r_x * r_z * s).xyz;
+}
+
+vec3 transformTR(in vec3 sample_point, in vec3 pos, in vec3 rot)
+{
+	mat4 r_y = rotationY(-rot.y);
+	mat4 r_x = rotationX(-rot.x);
+	mat4 r_z = rotationZ(-rot.z);
+
+	mat4 t = mat4(
+      vec4(1, 0, 0, -pos.x),
+      vec4(0, 1, 0, -pos.y),
+      vec4(0, 0, 1, -pos.z),
+      vec4(0, 0, 0, 1));
+	  
+	return (vec4(sample_point, 1.0) * t * r_y * r_x * r_z).xyz;
+}
+
+vec3 transformTRX(in vec3 sample_point, in vec3 pos, in float rot_x)
+{
+	mat4 r_x = rotationX(-rot_x);
+
+	mat4 t = mat4(
+      vec4(1, 0, 0, -pos.x),
+      vec4(0, 1, 0, -pos.y),
+      vec4(0, 0, 1, -pos.z),
+      vec4(0, 0, 0, 1));
+	  
+	return (vec4(sample_point, 1.0) * t * r_x).xyz;
+}
+
+vec3 transformTRY(in vec3 sample_point, in vec3 pos, in float rot_y)
+{
+	mat4 r_y = rotationY(-rot_y);
+
+	mat4 t = mat4(
+      vec4(1, 0, 0, -pos.x),
+      vec4(0, 1, 0, -pos.y),
+      vec4(0, 0, 1, -pos.z),
+      vec4(0, 0, 0, 1));
+	  
+	return (vec4(sample_point, 1.0) * t * r_y).xyz;
+}
+
+vec3 transformTRZ(in vec3 sample_point, in vec3 pos, in float rot_z)
+{
+	mat4 r_z = rotationZ(-rot_z);
+
+	mat4 t = mat4(
+      vec4(1, 0, 0, -pos.x),
+      vec4(0, 1, 0, -pos.y),
+      vec4(0, 0, 1, -pos.z),
+      vec4(0, 0, 0, 1));
+	  
+	return (vec4(sample_point, 1.0) * t * r_z).xyz;
+}
+
+vec3 transformTRXS(in vec3 sample_point, in vec3 pos, in float rot_x, in vec3 scale)
+{
+	mat4 s = mat4(
+      vec4(1/scale.x, 0, 0, 0),
+      vec4(0, 1/scale.y, 0, 0),
+      vec4(0, 0, 1/scale.z, 0),
+      vec4(0, 0, 0, 1));
+
+	mat4 r_x = rotationX(-rot_x);
+
+	mat4 t = mat4(
+      vec4(1, 0, 0, -pos.x),
+      vec4(0, 1, 0, -pos.y),
+      vec4(0, 0, 1, -pos.z),
+      vec4(0, 0, 0, 1));
+	  
+	return (vec4(sample_point, 1.0) * t * r_x * s).xyz;
+}
+
+vec3 transformTRYS(in vec3 sample_point, in vec3 pos, in float rot_y, in vec3 scale)
+{
+	mat4 s = mat4(
+      vec4(1/scale.x, 0, 0, 0),
+      vec4(0, 1/scale.y, 0, 0),
+      vec4(0, 0, 1/scale.z, 0),
+      vec4(0, 0, 0, 1));
+
+	mat4 r_y = rotationY(-rot_y);
+
+	mat4 t = mat4(
+      vec4(1, 0, 0, -pos.x),
+      vec4(0, 1, 0, -pos.y),
+      vec4(0, 0, 1, -pos.z),
+      vec4(0, 0, 0, 1));
+	  
+	return (vec4(sample_point, 1.0) * t * r_y * s).xyz;
+}
+
+vec3 transformTRZS(in vec3 sample_point, in vec3 pos, in float rot_z, in vec3 scale)
+{
+	mat4 s = mat4(
+      vec4(1/scale.x, 0, 0, 0),
+      vec4(0, 1/scale.y, 0, 0),
+      vec4(0, 0, 1/scale.z, 0),
+      vec4(0, 0, 0, 1));
+
+	mat4 r_z = rotationZ(-rot_z);
+
+	mat4 t = mat4(
+      vec4(1, 0, 0, -pos.x),
+      vec4(0, 1, 0, -pos.y),
+      vec4(0, 0, 1, -pos.z),
+      vec4(0, 0, 0, 1));
+	  
+	return (vec4(sample_point, 1.0) * t * r_z * s).xyz;
+}
+
+vec3 transformTRS1(in vec3 sample_point, in vec3 pos, in vec3 rot, in float scale)
+{
+	mat4 r_y = rotationY(-rot.y);
+	mat4 r_x = rotationX(-rot.x);
+	mat4 r_z = rotationZ(-rot.z);
+
+	mat4 t = mat4(
+      vec4(1, 0, 0, -pos.x),
+      vec4(0, 1, 0, -pos.y),
+      vec4(0, 0, 1, -pos.z),
+      vec4(0, 0, 0, 1));
+	  
+	return (vec4(sample_point, 1.0) * t * r_y * r_x * r_z).xyz / scale;
+}
+
+vec3 transformTRXS1(in vec3 sample_point, in vec3 pos, in float rot_x, in float scale)
+{
+	mat4 r_x = rotationX(-rot_x);
+
+	mat4 t = mat4(
+      vec4(1, 0, 0, -pos.x),
+      vec4(0, 1, 0, -pos.y),
+      vec4(0, 0, 1, -pos.z),
+      vec4(0, 0, 0, 1));
+	  
+	return (vec4(sample_point, 1.0) * t * r_x).xyz / scale;
+}
+
+vec3 transformTRYS1(in vec3 sample_point, in vec3 pos, in float rot_y, in float scale)
+{
+	mat4 r_y = rotationY(-rot_y);
+
+	mat4 t = mat4(
+      vec4(1, 0, 0, -pos.x),
+      vec4(0, 1, 0, -pos.y),
+      vec4(0, 0, 1, -pos.z),
+      vec4(0, 0, 0, 1));
+	  
+	return (vec4(sample_point, 1.0) * t * r_y).xyz / scale;
+}
+
+vec3 transformTRZS1(in vec3 sample_point, in vec3 pos, in float rot_z, in float scale)
+{
+	mat4 r_z = rotationZ(-rot_z);
+
+	mat4 t = mat4(
+      vec4(1, 0, 0, -pos.x),
+      vec4(0, 1, 0, -pos.y),
+      vec4(0, 0, 1, -pos.z),
+      vec4(0, 0, 0, 1));
+	  
+	return (vec4(sample_point, 1.0) * t * r_z).xyz / scale;
+}
+
+vec3 transformR(in vec3 sample_point, in vec3 rot)
+{
+	mat4 r_y = rotationY(-rot.y);
+	mat4 r_x = rotationX(-rot.x);
+	mat4 r_z = rotationZ(-rot.z);
+	
+	return (vec4(sample_point, 1.0) * r_y * r_x * r_z).xyz;
+}
+
+vec3 transformRX(in vec3 sample_point, in float rot_x)
+{
+	mat4 r_x = rotationX(-rot_x);
+	
+	return (vec4(sample_point, 1.0) * r_x).xyz;
+}
+
+vec3 transformRY(in vec3 sample_point, in float rot_y)
+{
+	mat4 r_y = rotationY(-rot_y);
+	
+	return (vec4(sample_point, 1.0) * r_y).xyz;
+}
+
+vec3 transformRZ(in vec3 sample_point, in float rot_z)
+{
+	mat4 r_z = rotationZ(-rot_z);
+
+	return (vec4(sample_point, 1.0) * r_z).xyz;
+}
+
+vec3 transformRXS(in vec3 sample_point, in float rot_x, in vec3 scale)
+{
+	mat4 s = mat4(
+      vec4(1/scale.x, 0, 0, 0),
+      vec4(0, 1/scale.y, 0, 0),
+      vec4(0, 0, 1/scale.z, 0),
+      vec4(0, 0, 0, 1));
+
+	mat4 r_x = rotationX(-rot_x);
+ 
+	return (vec4(sample_point, 1.0) * r_x * s).xyz;
+}
+
+vec3 transformRYS(in vec3 sample_point, in float rot_y, in vec3 scale)
+{
+	mat4 s = mat4(
+      vec4(1/scale.x, 0, 0, 0),
+      vec4(0, 1/scale.y, 0, 0),
+      vec4(0, 0, 1/scale.z, 0),
+      vec4(0, 0, 0, 1));
+
+	mat4 r_y = rotationY(-rot_y);
+
+	return (vec4(sample_point, 1.0) * r_y * s).xyz;
+}
+
+vec3 transformRZS(in vec3 sample_point, in float rot_z, in vec3 scale)
+{
+	mat4 s = mat4(
+      vec4(1/scale.x, 0, 0, 0),
+      vec4(0, 1/scale.y, 0, 0),
+      vec4(0, 0, 1/scale.z, 0),
+      vec4(0, 0, 0, 1));
+
+	mat4 r_z = rotationZ(-rot_z);
+
+	return (vec4(sample_point, 1.0) * r_z * s).xyz;
+}
+
+vec3 transformRS1(in vec3 sample_point, in vec3 rot, in float scale)
+{
+	mat4 r_y = rotationY(-rot.y);
+	mat4 r_x = rotationX(-rot.x);
+	mat4 r_z = rotationZ(-rot.z);
+
+	return (vec4(sample_point, 1.0) * r_y * r_x * r_z).xyz / scale;
+}
+
+vec3 transformRXS1(in vec3 sample_point, in float rot_x, in float scale)
+{
+	mat4 r_x = rotationX(-rot_x);
+
+	return (vec4(sample_point, 1.0) * r_x).xyz / scale;
+}
+
+vec3 transformRYS1(in vec3 sample_point, in float rot_y, in float scale)
+{
+	mat4 r_y = rotationY(-rot_y);
+
+	return (vec4(sample_point, 1.0) * r_y).xyz / scale;
+}
+
+vec3 transformRZS1(in vec3 sample_point, in float rot_z, in float scale)
+{
+	mat4 r_z = rotationZ(-rot_z);
+
+	return (vec4(sample_point, 1.0) * r_z).xyz / scale;
+}
+
+
+// --------------------------------------------------------------------
 
 // Repeat space along one axis. Use like this to repeat along the x axis:
 // <float cell = pMod1(p.x,5);> - using the return value is optional.
@@ -304,7 +676,11 @@ vec3 gammaCorrection(vec3 color)
 float sceneSDF(vec3 p)
 {
 	vec4 c = vec4(1);
-	float dist0 = mandelbulb(p + vec3(0, -2, 0), c);
+	//float dist0 = mandelbulb(transformTRS1(p, vec3(0, 2, 0), vec3(u_time * 0.5, 0, 45), 1.5), c) * 1.5;
+	
+	
+	float dist0 = mandelbulb(transformRS1(p - vec3(0, 2, 0), vec3(180, u_time * 2, 0), 1.5), c) * 1.5;
+	
 	float dist1 = sphere(vec4(0, 0, 2, 1), p);
 	float dist2 = cube(vec4(0, 0, 0, 1), p);
 	float dist3 = plane(p);
@@ -376,7 +752,7 @@ vec4 raymarch(vec3 ro, vec3 rd)
 		if (dist < 0.001)
 		{
 			vec3 p = ro + rd * depth;
-			return getLight(p, ro, i, vec3(0, 50, 0));
+			return getLight(p, ro, i, vec3(20, 50, 0));
 		}
 		
 		// move along the view ray

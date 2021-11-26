@@ -3,6 +3,10 @@
 #include <imgui/imgui-SFML.h>
 #include <SFML/Graphics.hpp>
 
+// math
+float clamp01(float v) { return (v < 0.0f) ? 0.0f : ((v > 1.0f) ? 1.0f : v); }
+float lerp(float v0, float v1, float k) { return v0 + (v1 - v0) * clamp01(k); }
+
 int main()
 {
 	int w = 1600;
@@ -16,6 +20,7 @@ int main()
 	sf::Vector3f pos = sf::Vector3f(2.0f, 3.0f, 3.0f);
 	sf::Clock clock;
 	int framesStill = 1;
+	bool firstFrame = true;
 
 	sf::RenderWindow window(sf::VideoMode(w, h), "Ray marching", sf::Style::Titlebar | sf::Style::Close);
 	window.setFramerateLimit(60);
@@ -106,11 +111,22 @@ int main()
 			}
 		}
 
-		ImGui::SFML::Update(window, delta_clock.restart());
-		ImGui::ShowDemoWindow();
-
-		if (mouseHidden)
+		sf::Time delta_time = delta_clock.restart();
+		ImGui::SFML::Update(window, delta_time);
+		static float smooth_fps = 60.0f;
+		smooth_fps = lerp(smooth_fps, 1 / delta_time.asSeconds(), 5.0f * delta_time.asSeconds());
+		ImGui::Text("FPS: %.1f", smooth_fps);
+		if (ImGui::Button("Reload shader"))
 		{
+			shader.loadFromFile("output_shader.frag", sf::Shader::Fragment);
+			shader.setUniform("u_resolution", sf::Vector2f(w, h));
+			firstFrame = true;
+		}
+
+		if (mouseHidden || firstFrame)
+		{
+			firstFrame = false;
+
 			float mx = ((float)mouseX / w - 0.5f) * mouseSensitivity;
 			float my = ((float)mouseY / h - 0.5f) * mouseSensitivity;
 			sf::Vector3f dir = sf::Vector3f(0.0f, 0.0f, 0.0f);
@@ -135,6 +151,7 @@ int main()
 			// x - right
 			// y - up
 			// z - back
+			// rotation order: XZ -> YZ -> XY
 
 			for (int i = 0; i < 6; i++)
 			{
@@ -146,11 +163,12 @@ int main()
 			}
 			shader.setUniform("u_pos", pos);
 			shader.setUniform("u_mouse", sf::Vector2f(mx, my));
-			shader.setUniform("u_time", clock.getElapsedTime().asSeconds());
-			shader.setUniform("u_sample_part", 1.0f / framesStill);
-			shader.setUniform("u_seed1", sf::Vector2f((float)dist(e2), (float)dist(e2)) * 999.0f);
-			shader.setUniform("u_seed2", sf::Vector2f((float)dist(e2), (float)dist(e2)) * 999.0f);
 		}
+		shader.setUniform("u_time", clock.getElapsedTime().asSeconds());
+		shader.setUniform("u_sample_part", 1.0f / framesStill);
+		shader.setUniform("u_seed1", sf::Vector2f((float)dist(e2), (float)dist(e2)) * 999.0f);
+		shader.setUniform("u_seed2", sf::Vector2f((float)dist(e2), (float)dist(e2)) * 999.0f);
+
 		if (framesStill % 2 == 1)
 		{
 			shader.setUniform("u_sample", firstTexture.getTexture());
