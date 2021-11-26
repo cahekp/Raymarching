@@ -83,6 +83,9 @@ void pR(inout vec2 p, float a) {
 	p = cos(a)*p + sin(a)*vec2(p.y, -p.x);
 }
 
+#define scale(func, samplePoint, scaleFactor) (func(samplePoint / scaleFactor) * scaleFactor)
+#define scale3(func, samplePoint, s_x, s_y, s_z) (func(samplePoint / vec3(s_x, s_y, s_z)) * min(s_x, min(s_y, s_z)))
+
 // Repeat space along one axis. Use like this to repeat along the x axis:
 // <float cell = pMod1(p.x,5);> - using the return value is optional.
 float pMod1(inout float p, float size) {
@@ -115,7 +118,7 @@ float pReflect(inout vec3 p, vec3 planeNormal, float offset) {
 	return (t<0)?-1:1;
 }
 
-// SHAPES -------------------------------------------------------------
+// SHAPES: SIMPLE -----------------------------------------------------
 // return: distance from the surface to the sample point (p)
 
 float plane(vec3 p)
@@ -158,6 +161,39 @@ float torus( vec3 p, vec2 t )
   return length(q)-t.y;
 }
 
+// SHAPES: FRACTALS ---------------------------------------------------
+// return: distance from the surface to the sample point (p)
+
+float mandelbulb( in vec3 p, out vec4 resColor )
+{
+    vec3 w = p;
+    float m = dot(w,w);
+
+    vec4 trap = vec4(abs(w),m);
+	float dz = 1.0;
+    
+	for( int i=0; i<4; i++ )
+    {
+		dz = 8.0*pow(m,3.5)*dz + 1.0;
+      
+        // z = z^8+z
+        float r = length(w);
+        float b = 8.0*acos( w.y/r);
+        float a = 8.0*atan( w.x, w.z );
+        w = p + pow(r,8.0) * vec3( sin(b)*sin(a), cos(b), sin(b)*cos(a) );
+        
+        trap = min( trap, vec4(abs(w),m) );
+
+        m = dot(w,w);
+		if( m > 256.0 )
+            break;
+    }
+
+    resColor = vec4(m,trap.yzw);
+
+    // distance estimation (through the Hubbard-Douady potential)
+    return 0.25*log(m)*sqrt(m)/dz;
+}
 
 // LIGHTING ------------------------------------------------------------
 
@@ -262,19 +298,21 @@ vec3 gammaCorrection(vec3 color)
 	return pow(color, vec3(0.4545)); // 0.4545 == 1 / 2.2
 }
 
-// ---------------------------------------------------------------------
-
-
-
+// SCENE ---------------------------------------------------------------
 
 // return distance to nearest intersection
 float sceneSDF(vec3 p)
 {
+	vec4 c = vec4(1);
+	float dist0 = mandelbulb(p + vec3(0, -2, 0), c);
 	float dist1 = sphere(vec4(0, 0, 2, 1), p);
 	float dist2 = cube(vec4(0, 0, 0, 1), p);
 	float dist3 = plane(p);
-	return smin(smin(dist1, dist2, 0.5), dist3, 0.5);
+	return smin(dist0, smin(smin(dist1, dist2, 0.5), dist3, 0.5), 0.33);
 }
+
+// ---------------------------------------------------------------------
+
 
 //vec3 getNormal(vec3 p)
 //{
