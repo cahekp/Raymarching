@@ -75,6 +75,11 @@ float smin_exp(float a, float b, float k = 32)
     return -log(max(0.0001,res)) / k;
 }
 
+float rounding(in float d, in float h = 0.1)
+{
+    return d - h;
+}
+
 // TRANSFORMATION: FAST, BUT HARD TO USE (SOMETIMES) ------------------
 
 void translatePoint(inout vec3 p, vec3 offset)
@@ -516,6 +521,13 @@ float cube(vec4 s, vec3 p)
 	return length(max(q, 0)) + min(max(q.x, max(q.y, q.z)), 0);
 }
 
+float sdBox( vec3 p, vec3 b )
+{
+    vec3  di = abs(p) - b;
+    float mc = max(di.x,max(di.y,di.z));
+    return min(mc,length(max(di,0.0)));
+}
+
 float cylinder(const in vec3 p,  float r )
 {
 	return length(p.xy)-r;
@@ -567,55 +579,114 @@ float mandelbulb( in vec3 p, out vec4 resColor )
     return 0.25*log(m)*sqrt(m)/dz;
 }
 
-// LIGHTING ------------------------------------------------------------
-
-// http://iquilezles.org/www/articles/rmshadows/rmshadows.htm
-float calcSoftshadow( in vec3 ro, in vec3 rd, in float mint, in float tmax )
+// menger sponge
+vec3 mengersponge(in vec3 p)
 {
-    // bounding volume
-    float tp = (0.8-ro.y)/rd.y; if( tp>0.0 ) tmax = min( tmax, tp );
+   float d = sdBox(p,vec3(1.0));
+   vec3 res = vec3(d, 1.0, 0.0);
 
-    float res = 1.0;
-    float t = mint;
-    for( int i=0; i<24; i++ )
-    {
-		float h = sceneSDF( ro + rd*t );
-        float s = clamp(8.0*h/t,0.0,1.0);
-        res = min( res, s*s*(3.0-2.0*s) );
-        t += clamp( h, 0.02, 0.2 );
-        if( res<0.004 || t>tmax ) break;
-    }
-    return clamp( res, 0.0, 1.0 );
+   float s = 1.0;
+   for( int m=0; m<3; m++ )
+   {
+      vec3 a = mod( p*s, 2.0 )-1.0;
+      s *= 3.0;
+      vec3 r = abs(1.0 - 3.0*abs(a));
+
+      float da = max(r.x,r.y);
+      float db = max(r.y,r.z);
+      float dc = max(r.z,r.x);
+      float c = (min(da,min(db,dc))-1.0)/s;
+
+      if( c>d )
+      {
+          d = c;
+          res = vec3( d, 0.2*da*db*dc, (1.0+float(m))/4.0);
+       }
+   }
+
+   return res;
 }
 
-//float shadow(vec3 pt)
+// LIGHTING ------------------------------------------------------------
+
+// sharp shadows
+// https://iquilezles.org/www/articles/rmshadows/rmshadows.htm
+// ro + rd - ray from a sample point to the light source
+// maxt - distance to the light source
+// return 0 if there is intersection ("ro" in the shadow)
+// return 1 if sample point "ro" is fully illuminated
+float shadow(in vec3 ro, in vec3 rd, float mint, float maxt)
+{
+    for (float t = mint; t < maxt;)
+    {
+        float d = sceneSDF(ro + rd * t);
+        if (d < 0.001)
+            return 0.0;
+        t += d;
+    }
+    return 1.0;
+}
+
+// soft shadows
+// k - sharping factor (k = 2 - soft shadows, 128 - sharp shadows)
+float softshadow(in vec3 ro, in vec3 rd, float mint, float maxt, float k)
+{
+    float res = 1.0;
+    for (float t = mint; t < maxt;)
+    {
+        float d = sceneSDF(ro + rd * t);
+        if (d < 0.001)
+            return 0.0;
+        res = min(res, k * d / t);
+        t += d;
+    }
+    return res;
+}
+
+// soft shadows (improved by Sebastian Aaltonen at GDC)
+float softshadow2(in vec3 ro, in vec3 rd, float mint, float maxt, float k)
+{
+    float res = 1.0;
+    float ph = 1e20;
+    for (float t = mint; t < maxt;)
+    {
+        float h = sceneSDF(ro + rd * t);
+        if (h < 0.001)
+            return 0.0;
+        float y = h * h / (2.0 * ph);
+        float d = sqrt(h * h - y * y);
+        res = min(res, k * d / max(0.0, t - y));
+        ph = h;
+        t += h;
+    }
+    return res;
+}
+
+// find normal vector of the scene surface
+// classic technique - forward and central differences (6 sceneSDF)
+//vec3 getNormal(in vec3 p)
 //{
-//  vec3 lightDir = normalize(lightPos - pt);
-//  float kd = 1;
-//  int step = 0;
-//  for (float t = 0.1; 
-//      t < length(lightPos - pt) 
-//      && step < renderDepth && kd > 0.001; ) {
-//    float d = abs(getSDF(pt + t * lightDir));
-//    if (d < 0.001) {
-//      kd = 0;
-//    } else {
-//      kd = min(kd, 16 * d / t);
-//    }
-//    t += d;
-//    step++;
-//  }
-//  return kd;
+//	float eps = 0.001;
+//	return normalize(vec3(
+//		sceneSDF(vec3(p.x + eps, p.y, p.z)) - sceneSDF(vec3(p.x - eps, p.y, p.z)),
+//		sceneSDF(vec3(p.x, p.y + eps, p.z)) - sceneSDF(vec3(p.x, p.y - eps, p.z)),
+//		sceneSDF(vec3(p.x, p.y, p.z  + eps)) - sceneSDF(vec3(p.x, p.y, p.z - eps))
+//	));
 //}
 
-vec3 getNormal(vec3 p)
+// find normal vector of the scene surface
+// tetrahedron technique (4 sceneSDF)
+vec3 getNormal(in vec3 p)
 {
-	float eps = 0.001;
-	return normalize(vec3(
-		sceneSDF(vec3(p.x + eps, p.y, p.z)) - sceneSDF(vec3(p.x - eps, p.y, p.z)),
-		sceneSDF(vec3(p.x, p.y + eps, p.z)) - sceneSDF(vec3(p.x, p.y - eps, p.z)),
-		sceneSDF(vec3(p.x, p.y, p.z  + eps)) - sceneSDF(vec3(p.x, p.y, p.z - eps))
-	));
+	const float h = 0.001;
+	const vec3 k0 = vec3(1.0, -1.0, -1.0);
+	const vec3 k1 = vec3(-1.0, -1.0, 1.0);
+	const vec3 k2 = vec3(-1.0, 1.0, -1.0);
+	const vec3 k3 = vec3(1.0, 1.0, 1.0);
+    return normalize(k0 * sceneSDF(p + k0 * h) +
+                     k1 * sceneSDF(p + k1 * h) +
+                     k2 * sceneSDF(p + k2 * h) +
+                     k3 * sceneSDF(p + k3 * h));
 }
 
 float calcAO( in vec3 pos, in vec3 nor )
@@ -679,7 +750,8 @@ float sceneSDF(vec3 p)
 	//float dist0 = mandelbulb(transformTRS1(p, vec3(0, 2, 0), vec3(u_time * 0.5, 0, 45), 1.5), c) * 1.5;
 	
 	
-	float dist0 = mandelbulb(transformRS1(p - vec3(0, 2, 0), vec3(180, u_time * 2, 0), 1.5), c) * 1.5;
+	//float dist0 = mandelbulb(transformRS1(p - vec3(0, 2, 0), vec3(180, u_time * 2, 0), 1.5), c) * 1.5;
+	float dist0 = mengersponge(transformR(p - vec3(0, 3, 0), vec3(180, u_time * 2, 0))).x;
 	
 	float dist1 = sphere(vec4(0, 0, 2, 1), p);
 	float dist2 = cube(vec4(0, 0, 0, 1), p);
@@ -689,14 +761,6 @@ float sceneSDF(vec3 p)
 
 // ---------------------------------------------------------------------
 
-
-//vec3 getNormal(vec3 p)
-//{
-//	float d = sceneSDF(p);
-//	vec2 e = vec2(0.001, 0);
-//	vec3 n = d - vec3(sceneSDF(p - e.xyy), sceneSDF(p - e.yxy), sceneSDF(p - e.yyx));
-//	return normalize(n);
-//}
 
 float raymarchLight(vec3 ro, vec3 rd)
 {
@@ -740,7 +804,7 @@ vec4 getLight(vec3 p, vec3 ro, int i, vec3 lightPos)
 
 // ro - ray origin
 // rd - ray direction
-vec4 raymarch(vec3 ro, vec3 rd)
+vec4 raymarching(vec3 ro, vec3 rd)
 {
 	float depth = 0 /* znear */;
 	for (int i = 0; i < MAX_MARCHING_STEPS; i++)
@@ -778,6 +842,6 @@ void main() {
 	vec3 rayDirection = normalize(vec3(uv.x, -uv.y, -1.0));
 	rayDirection.yz *= rot(-u_mouse.y);
 	rayDirection.xz *= rot(u_mouse.x);
-	vec3 col = vec3(raymarch(rayOrigin, rayDirection));
+	vec3 col = vec3(raymarching(rayOrigin, rayDirection));
 	gl_FragColor = vec4(col, 1.0);
 }
