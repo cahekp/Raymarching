@@ -612,6 +612,7 @@ vec3 mengersponge(in vec3 p)
 // sharp shadows
 // https://iquilezles.org/www/articles/rmshadows/rmshadows.htm
 // ro + rd - ray from a sample point to the light source
+// mint - shadow bias (to prevent "shadow acne" effect)
 // maxt - distance to the light source
 // return 0 if there is intersection ("ro" in the shadow)
 // return 1 if sample point "ro" is fully illuminated
@@ -629,7 +630,7 @@ float shadow(in vec3 ro, in vec3 rd, float mint, float maxt)
 
 // soft shadows
 // k - sharping factor (k = 2 - soft shadows, 128 - sharp shadows)
-float softshadow(in vec3 ro, in vec3 rd, float mint, float maxt, float k)
+float softshadow(in vec3 ro, in vec3 rd, float mint, float maxt, float k = 2)
 {
     float res = 1.0;
     for (float t = mint; t < maxt;)
@@ -644,7 +645,7 @@ float softshadow(in vec3 ro, in vec3 rd, float mint, float maxt, float k)
 }
 
 // soft shadows (improved by Sebastian Aaltonen at GDC)
-float softshadow2(in vec3 ro, in vec3 rd, float mint, float maxt, float k)
+float softshadow2(in vec3 ro, in vec3 rd, float mint, float maxt, float k = 2)
 {
     float res = 1.0;
     float ph = 1e20;
@@ -664,19 +665,19 @@ float softshadow2(in vec3 ro, in vec3 rd, float mint, float maxt, float k)
 
 // find normal vector of the scene surface
 // classic technique - forward and central differences (6 sceneSDF)
-//vec3 getNormal(in vec3 p)
-//{
-//	float eps = 0.001;
-//	return normalize(vec3(
-//		sceneSDF(vec3(p.x + eps, p.y, p.z)) - sceneSDF(vec3(p.x - eps, p.y, p.z)),
-//		sceneSDF(vec3(p.x, p.y + eps, p.z)) - sceneSDF(vec3(p.x, p.y - eps, p.z)),
-//		sceneSDF(vec3(p.x, p.y, p.z  + eps)) - sceneSDF(vec3(p.x, p.y, p.z - eps))
-//	));
-//}
+vec3 getNormal(in vec3 p)
+{
+	float eps = 0.001;
+	return normalize(vec3(
+		sceneSDF(vec3(p.x + eps, p.y, p.z)) - sceneSDF(vec3(p.x - eps, p.y, p.z)),
+		sceneSDF(vec3(p.x, p.y + eps, p.z)) - sceneSDF(vec3(p.x, p.y - eps, p.z)),
+		sceneSDF(vec3(p.x, p.y, p.z  + eps)) - sceneSDF(vec3(p.x, p.y, p.z - eps))
+	));
+}
 
 // find normal vector of the scene surface
 // tetrahedron technique (4 sceneSDF)
-vec3 getNormal(in vec3 p)
+vec3 getNormalFast(in vec3 p)
 {
 	const float h = 0.001;
 	const vec3 k0 = vec3(1.0, -1.0, -1.0);
@@ -689,7 +690,7 @@ vec3 getNormal(in vec3 p)
                      k3 * sceneSDF(p + k3 * h));
 }
 
-float calcAO( in vec3 pos, in vec3 nor )
+float ambientOcclusion( in vec3 pos, in vec3 nor )
 {
 	float occ = 0.0;
     float sca = 1.0;
@@ -704,21 +705,11 @@ float calcAO( in vec3 pos, in vec3 nor )
     return clamp( 1.0 - 3.0*occ, 0.0, 1.0 ) * (0.5+0.5*nor.y);
 }
 
-const float _AOSteps = 5;
-const float _AOStep = 0.1;
-const float _AOStepSize = 1.0;
 
-// good ambient occlusion
-float ambientOcclusion(vec3 pos, vec3 normal)
-{
-    float sum = 0;
-    for (int i = 0; i < _AOSteps; i ++)
-    {
-        vec3 p = pos + normal * (i+1) * _AOStepSize;
-        sum    += sceneSDF(p);
-    }
-    return sum / (_AOStep * _AOStepSize);
-}
+// the more value, the better the AO quality
+const float _AOSteps = 4;
+// the smaller the step, the darker the small details
+const float _AOStepSize = 0.2;
 
 // ambient occlusion (realistic, exponential decay)
 float ambientOcclusionReal(vec3 pos, vec3 normal)
@@ -736,7 +727,7 @@ float ambientOcclusionReal(vec3 pos, vec3 normal)
 
 // POST-PROCESSING -----------------------------------------------------
 
-vec3 gammaCorrection(vec3 color)
+vec3 gammaCorrection(in vec3 color)
 {
 	return pow(color, vec3(0.4545)); // 0.4545 == 1 / 2.2
 }
@@ -761,7 +752,7 @@ float sceneSDF(vec3 p)
 
 // ---------------------------------------------------------------------
 
-
+// DELETE?
 float raymarchLight(vec3 ro, vec3 rd)
 {
 	float dO = 0;
@@ -777,57 +768,127 @@ float raymarchLight(vec3 ro, vec3 rd)
 	return md;
 }
 
-vec4 getLight(vec3 p, vec3 ro, int i, vec3 lightPos)
+// find intersection using raymarching SDF scene
+// ro - ray origin
+// rd - ray direction
+// return: intersection point
+vec3 castRay(in vec3 ro, in vec3 rd)
 {
-	vec3 l = normalize(lightPos - p);
-	vec3 n = getNormal(p);
+	float depth = ZNEAR;
+	vec3 p = ro + rd * depth;
+	for (int i = 0; i < MAX_MARCHING_STEPS; i++)
+	{
+		// get a distance to the nearest scene's surface
+		float dist = sceneSDF(p);
+
+		// found intersection?
+		if (dist < 0.001)
+			return p;
+		
+		// move along the view ray
+		depth += dist;
+		p = ro + rd * depth;
+
+		// reached zfar?
+		if (depth >= ZFAR)
+			return ro + rd * ZFAR;
+
+	}
+	return p;
+}
+
+vec3 getColor(in vec3 p)
+{
+	return vec3(1.0, 1.0, 1.0);
+}
+
+// DELETE?
+vec3 shade(vec3 o, vec3 p, vec3 n, vec3 lo)
+{
+    vec3 l = normalize(lo - p);
+	
+	// add light
 	float dif = clamp(dot(n, l) * 0.5 + 0.5, 0, 1);
 	float d = raymarchLight(p + n * 0.1 * 10, l);
 	d += 1;
 	d = clamp(d, 0, 1);
 	dif *= d;
-	vec4 col = vec4(dif, dif, dif, 1);
+	vec3 col = vec3(dif, dif, dif);
 	
-	// fast ambient occlusion
-	float occ = (float(i) / MAX_MARCHING_STEPS * 2);
-	occ = 1 - occ;
-	occ *= occ;
-	col.rgb *= occ;
+    float sh = softshadow(p, l, 0.1, length(lo - p), 4.0);
+	vec3 cshadow = pow( vec3(sh), vec3(1.0, 1.2, 1.5) );
 	
-	float fog = distance(p, ro);
-	fog /= ZFAR;
-	fog = clamp(fog, 0, 1);
-	fog *= fog;
-	col.rgb = col.rgb * (1 - fog) + 0.28 * fog;
+    return mix(cshadow, col, sh);
+}
+
+vec3 applyFog(in vec3 color, in vec3 ro, in vec3 p, in vec3 fog_color)
+{
+	float fog_amount = clamp(distance(p, ro) / ZFAR, 0.0, 1.0);
+	fog_amount *= fog_amount;
+	return mix(color, fog_color, fog_amount);
+}
+
+// be/bi - fallof parameters for the extinction and inscattering
+vec3 applyScattering(in vec3 color, in vec3 ro, in vec3 p, in vec3 fog_color,
+	in vec3 be = vec3(2.0), in vec3 bi = vec3(2.0))
+{
+	float d = 1.0 - clamp(distance(p, ro) / ZFAR, 0.0, 1.0);
+
+	// ext_color = extinction: absortion of light due to scattering
+	// ins_color = inscattering
+	vec3 ext_color = vec3(exp(-d * be.x), exp(-d * be.y), exp(-d * be.z));
+	vec3 ins_color = vec3(exp(-d * bi.x), exp(-d * bi.y), exp(-d * bi.z));
+	return color * (1.0 - ext_color) + fog_color * ins_color;
+}
+
+vec3 tonemapping(in vec3 color)
+{
+    vec3 col = color*2.0/(1.0+color);
+	col = pow(col, vec3(0.4545));
+    col = pow(col,vec3(0.85,0.97,1.0));
+    col = col*0.5 + 0.5*col*col*(3.0-2.0*col);
 	return col;
+}
+
+vec3 vignette(in vec3 color, in vec2 uv, float amount = 0.1)
+{
+	return color * (0.5 + 0.5 * pow(16.0 * uv.x * uv.y * (1.0 - uv.x) * (1.0 - uv.y), amount));
 }
 
 // ro - ray origin
 // rd - ray direction
-vec4 raymarching(vec3 ro, vec3 rd)
+// return: color of the intersection
+vec3 render(in vec3 ro, in vec3 rd)
 {
-	float depth = 0 /* znear */;
-	for (int i = 0; i < MAX_MARCHING_STEPS; i++)
-	{
-		// get a distance to the nearest scene's surface
-		float dist = sceneSDF(ro + rd * depth);
+	// find intersection point and its normal
+    vec3 p = castRay(ro, rd);
+    vec3 n = getNormalFast(p);
+    
+	// find color of the intersection point
+    vec3 c = getColor(ro);
+	
+	// add lights and shadows
+	vec3 lightPos = vec3(20, 50, 0);
+	vec3 lightDir = normalize(lightPos - p);
+	float occ = ambientOcclusion(p, n);
+	float sha = softshadow(p, lightDir, 0.1, length(lightPos - p), 4.0);
+	float light = clamp(dot(n, lightDir), 0.0, 1.0);
+	float sky = clamp(0.5 + 0.5 * n.y, 0.0, 1.0);
+	float ind = clamp(dot(n, normalize(lightDir*vec3(-1.0,0.0,-1.0))), 0.0, 1.0); // indirect lighting
+	vec3 shading = light * vec3(1.64,1.27,0.99) * pow(vec3(sha),vec3(1.0,1.2,1.5));
+    shading += sky * vec3(0.16,0.20,0.28) * occ;
+    shading += ind * vec3(0.40,0.28,0.20) * occ;
+	c = c * shading;
 
-		// found intersection?
-		if (dist < 0.001)
-		{
-			vec3 p = ro + rd * depth;
-			return getLight(p, ro, i, vec3(20, 50, 0));
-		}
-		
-		// move along the view ray
-		depth += dist;
+	// add fog/haze
+	//c = applyFog(c, ro, p, vec3(0.34, 0.435, 0.57));
+	c = applyScattering(c, ro, p, vec3(0.34, 0.435, 0.57), vec3(2.0), vec3(2.0));
 
-		// reached zfar?
-		if (depth >= ZFAR)
-			return vec4(0);
+	// color post processing
+	//c = gammaCorrection(c);
+	c = tonemapping(c);
 
-	}
-	return vec4(0);
+    return c;
 }
 
 mat2 rot(float a) {
@@ -842,6 +903,7 @@ void main() {
 	vec3 rayDirection = normalize(vec3(uv.x, -uv.y, -1.0));
 	rayDirection.yz *= rot(-u_mouse.y);
 	rayDirection.xz *= rot(u_mouse.x);
-	vec3 col = vec3(raymarching(rayOrigin, rayDirection));
+	vec3 col = render(rayOrigin, rayDirection);
+	col = vignette(col, gl_TexCoord[0].xy);
 	gl_FragColor = vec4(col, 1.0);
 }
