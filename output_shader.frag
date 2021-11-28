@@ -13,7 +13,7 @@ uniform vec2 u_seed2;
 
 const float ZNEAR = 0;
 const float ZFAR = 50;
-const int MAX_MARCHING_STEPS = 500;
+const int MAX_MARCHING_STEPS = 128;
 
 // forward declarations
 float sceneSDF(vec3 p);
@@ -609,6 +609,88 @@ vec3 mengersponge(in vec3 p)
 
 // LIGHTING ------------------------------------------------------------
 
+
+/**
+ * Lighting contribution of a single point light source via Phong illumination.
+ * 
+ * The vec3 returned is the RGB color of the light's contribution.
+ *
+ * k_a: Ambient color
+ * k_d: Diffuse color
+ * k_s: Specular color
+ * alpha: Shininess coefficient
+ * p: position of point being lit
+ * eye: the position of the camera
+ * lightPos: the position of the light
+ * lightIntensity: color/intensity of the light
+ *
+ * See https://en.wikipedia.org/wiki/Phong_reflection_model#Description
+ */
+//vec3 phongContribForLight(vec3 k_d, vec3 k_s, float alpha, vec3 p, vec3 eye,
+//                          vec3 lightPos, vec3 lightIntensity) {
+//    vec3 N = estimateNormal(p);
+//    vec3 L = normalize(lightPos - p);
+//    vec3 V = normalize(eye - p);
+//    vec3 R = normalize(reflect(-L, N));
+//    
+//    float dotLN = dot(L, N);
+//    float dotRV = dot(R, V);
+//    
+//    if (dotLN < 0.0) {
+//        // Light not visible from this point on the surface
+//        return vec3(0.0, 0.0, 0.0);
+//    } 
+//    
+//    if (dotRV < 0.0) {
+//        // Light reflection in opposite direction as viewer, apply only diffuse
+//        // component
+//        return lightIntensity * (k_d * dotLN);
+//    }
+//    return lightIntensity * (k_d * dotLN + k_s * pow(dotRV, alpha));
+//}
+
+/**
+ * Lighting via Phong illumination.
+ * 
+ * The vec3 returned is the RGB color of that point after lighting is applied.
+ * k_a: Ambient color
+ * k_d: Diffuse color
+ * k_s: Specular color
+ * alpha: Shininess coefficient
+ * p: position of point being lit
+ * eye: the position of the camera
+ *
+ * See https://en.wikipedia.org/wiki/Phong_reflection_model#Description
+ */
+//vec3 phongIllumination(vec3 k_a, vec3 k_d, vec3 k_s, float alpha, vec3 p, vec3 eye) {
+//    const vec3 ambientLight = 0.5 * vec3(1.0, 1.0, 1.0);
+//    vec3 color = ambientLight * k_a;
+//    
+//    vec3 light1Pos = vec3(4.0 * sin(iTime),
+//                          2.0,
+//                          4.0 * cos(iTime));
+//    vec3 light1Intensity = vec3(0.4, 0.4, 0.4);
+//    
+//    color += phongContribForLight(k_d, k_s, alpha, p, eye,
+//                                  light1Pos,
+//                                  light1Intensity);
+//    
+//    vec3 light2Pos = vec3(2.0 * sin(0.37 * iTime),
+//                          2.0 * cos(0.37 * iTime),
+//                          2.0);
+//    vec3 light2Intensity = vec3(0.4, 0.4, 0.4);
+//    
+//    color += phongContribForLight(k_d, k_s, alpha, p, eye,
+//                                  light2Pos,
+//                                  light2Intensity);    
+//    return color;
+//}
+
+// vec3 K_a = vec3(0.2, 0.2, 0.2);
+// vec3 K_d = vec3(0.7, 0.2, 0.2);
+// vec3 K_s = vec3(1.0, 1.0, 1.0);
+// float shininess = 10.0;
+
 // sharp shadows
 // https://iquilezles.org/www/articles/rmshadows/rmshadows.htm
 // ro + rd - ray from a sample point to the light source
@@ -639,7 +721,7 @@ float softshadow(in vec3 ro, in vec3 rd, float mint, float maxt, float k = 2)
         if (d < 0.001)
             return 0.0;
         res = min(res, k * d / t);
-        t += d;
+		t += d;
     }
     return res;
 }
@@ -658,7 +740,12 @@ float softshadow2(in vec3 ro, in vec3 rd, float mint, float maxt, float k = 2)
         float d = sqrt(h * h - y * y);
         res = min(res, k * d / max(0.0, t - y));
         ph = h;
-        t += h;
+		
+		// simple fix to prevent color banding of the shadow
+		// (increase quality, decrease performance)
+		t += h * 0.1 + 0.001;
+		// original method (produces color banding sometime) is:
+        // t += h;
     }
     return res;
 }
@@ -734,7 +821,13 @@ vec3 gammaCorrection(in vec3 color)
 
 // SCENE ---------------------------------------------------------------
 
-// return distance to nearest intersection
+/**
+ * Signed distance function describing the scene.
+ * 
+ * Absolute value of the return value indicates the distance to the surface.
+ * Sign indicates whether the point is inside or outside the surface,
+ * negative indicating inside.
+ */
 float sceneSDF(vec3 p)
 {
 	vec4 c = vec4(1);
@@ -745,6 +838,7 @@ float sceneSDF(vec3 p)
 	float dist0 = mengersponge(transformR(p - vec3(0, 3, 0), vec3(180, u_time * 2, 0))).x;
 	
 	float dist1 = sphere(vec4(0, 0, 2, 1), p);
+	//float dist1 = sphere(vec4(0, 1.5, 0, 1), p / 1.2) * 1.2;
 	float dist2 = cube(vec4(0, 0, 0, 1), p);
 	float dist3 = plane(p);
 	return smin(dist0, smin(smin(dist1, dist2, 0.5), dist3, 0.5), 0.33);
@@ -841,18 +935,46 @@ vec3 applyScattering(in vec3 color, in vec3 ro, in vec3 p, in vec3 fog_color,
 	return color * (1.0 - ext_color) + fog_color * ins_color;
 }
 
-vec3 tonemapping(in vec3 color)
+vec3 tonemap(in vec3 color)
 {
     vec3 col = color*2.0/(1.0+color);
-	col = pow(col, vec3(0.4545));
+	col = pow(col, vec3(0.4545)); // gamma correction
     col = pow(col,vec3(0.85,0.97,1.0));
     col = col*0.5 + 0.5*col*col*(3.0-2.0*col);
 	return col;
 }
 
+// INCORRECT!
+// use this function after gamma correction pass
+vec3 brightness(in vec3 color, float value = 0.9)
+{
+	return color * value;
+}
+
+// INCORRECT!
+// use this function after gamma correction pass
+vec3 saturation(in vec3 color, float value = 0.85)
+{
+	return mix(vec3(length(color)),color,value);
+}
+
+vec3 contrast(in vec3 color)
+{
+	return smoothstep(0.15, 1.1, color);
+}
+
 vec3 vignette(in vec3 color, in vec2 uv, float amount = 0.1)
 {
 	return color * (0.5 + 0.5 * pow(16.0 * uv.x * uv.y * (1.0 - uv.x) * (1.0 - uv.y), amount));
+}
+
+vec3 interlacedScan(vec3 color, vec2 uv)
+{
+	uv.y *= u_resolution.y / 240.0;
+	color.r *= (0.5 + abs(0.5 - mod(uv.y        , 0.021) / 0.021) * 0.5) * 1.5;
+	color.g *= (0.5 + abs(0.5 - mod(uv.y + 0.007, 0.021) / 0.021) * 0.5) * 1.5;
+	color.b *= (0.5 + abs(0.5 - mod(uv.y + 0.014, 0.021) / 0.021) * 0.5) * 1.5;
+	return color;
 }
 
 // ro - ray origin
@@ -871,7 +993,8 @@ vec3 render(in vec3 ro, in vec3 rd)
 	vec3 lightPos = vec3(20, 50, 0);
 	vec3 lightDir = normalize(lightPos - p);
 	float occ = ambientOcclusion(p, n);
-	float sha = softshadow(p, lightDir, 0.1, length(lightPos - p), 4.0);
+	float sha = softshadow2(p, lightDir, 0.1, length(lightPos - p), 4.0);
+	//float sha = shadow(p, lightDir, 0.1, length(lightPos - p));
 	float light = clamp(dot(n, lightDir), 0.0, 1.0);
 	float sky = clamp(0.5 + 0.5 * n.y, 0.0, 1.0);
 	float ind = clamp(dot(n, normalize(lightDir*vec3(-1.0,0.0,-1.0))), 0.0, 1.0); // indirect lighting
@@ -886,7 +1009,8 @@ vec3 render(in vec3 ro, in vec3 rd)
 
 	// color post processing
 	//c = gammaCorrection(c);
-	c = tonemapping(c);
+	c = tonemap(c);
+	c = contrast(c);
 
     return c;
 }
@@ -897,6 +1021,19 @@ mat2 rot(float a) {
 	return mat2(c, -s, s, c);
 }
 
+/**
+ * Return the normalized direction to march in from the eye point for a single pixel.
+ * 
+ * fieldOfView: vertical field of view in degrees
+ * size: resolution of the output image
+ * fragCoord: the x,y coordinate of the pixel in the output image
+ */
+vec3 calcRayDir(float fieldOfView, vec2 size, vec2 fragCoord) {
+    vec2 xy = fragCoord - size / 2.0;
+    float z = size.y / tan(radians(fieldOfView) / 2.0);
+    return normalize(vec3(xy, -z));
+}
+
 void main() {
 	vec2 uv = (gl_TexCoord[0].xy - 0.5) * u_resolution / u_resolution.y;
 	vec3 rayOrigin = u_pos;
@@ -905,5 +1042,6 @@ void main() {
 	rayDirection.xz *= rot(u_mouse.x);
 	vec3 col = render(rayOrigin, rayDirection);
 	col = vignette(col, gl_TexCoord[0].xy);
+	//col = interlacedScan(col, gl_TexCoord[0].xy);
 	gl_FragColor = vec4(col, 1.0);
 }
