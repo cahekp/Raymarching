@@ -1001,6 +1001,11 @@ vec3 render(in vec3 ro, in vec3 rd)
 	vec3 shading = light * vec3(1.64,1.27,0.99) * pow(vec3(sha),vec3(1.0,1.2,1.5));
     shading += sky * vec3(0.16,0.20,0.28) * occ;
     shading += ind * vec3(0.40,0.28,0.20) * occ;
+	
+	// DOESN'T WORK!
+	//float fresnel = clamp(1.0 + dot(n, rd), 0.0, 1.0);
+	//shading += 25.0 * fresnel * fresnel * occ;
+	
 	c = c * shading;
 
 	// add fog/haze
@@ -1034,6 +1039,7 @@ vec3 calcRayDir(float fieldOfView, vec2 size, vec2 fragCoord) {
     return normalize(vec3(xy, -z));
 }
 
+// NO AA
 void main() {
 	vec2 uv = (gl_TexCoord[0].xy - 0.5) * u_resolution / u_resolution.y;
 	vec3 rayOrigin = u_pos;
@@ -1045,3 +1051,28 @@ void main() {
 	//col = interlacedScan(col, gl_TexCoord[0].xy);
 	gl_FragColor = vec4(col, 1.0);
 }
+
+// SSAA (2x)
+//void main() {
+//	vec3 sum_col = vec3(0.0);
+//	int AA = 2;
+//	for (int jj=0; jj<AA; jj++)
+//    for (int ii=0; ii<AA; ii++)
+//	{
+//		// gl_TexCoord[0].xy range: [0, 1]
+//		vec2 uv = (gl_TexCoord[0].xy - 0.5) * u_resolution / u_resolution.y;
+//		vec2 aa_offset = vec2(float(ii), float(jj)) / (float(AA) * u_resolution.y);
+//		uv += aa_offset;
+//		
+//		vec3 rayOrigin = u_pos;
+//		vec3 rayDirection = normalize(vec3(uv.x, -uv.y, -1.0));
+//		rayDirection.yz *= rot(-u_mouse.y);
+//		rayDirection.xz *= rot(u_mouse.x);
+//		sum_col += render(rayOrigin, rayDirection);
+//	}
+//	vec3 col = sum_col / float(AA*AA);
+//	
+//	col = vignette(col, gl_TexCoord[0].xy);
+//	
+//	gl_FragColor = vec4(col, 1.0);
+//}
