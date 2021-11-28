@@ -609,6 +609,32 @@ vec3 mengersponge(in vec3 p)
 
 // LIGHTING ------------------------------------------------------------
 
+// find normal vector of the scene surface
+// classic technique - forward and central differences (6 sceneSDF)
+vec3 getNormal(in vec3 p)
+{
+	float eps = 0.001;
+	return normalize(vec3(
+		sceneSDF(vec3(p.x + eps, p.y, p.z)) - sceneSDF(vec3(p.x - eps, p.y, p.z)),
+		sceneSDF(vec3(p.x, p.y + eps, p.z)) - sceneSDF(vec3(p.x, p.y - eps, p.z)),
+		sceneSDF(vec3(p.x, p.y, p.z  + eps)) - sceneSDF(vec3(p.x, p.y, p.z - eps))
+	));
+}
+
+// find normal vector of the scene surface
+// tetrahedron technique (4 sceneSDF)
+vec3 getNormalFast(in vec3 p)
+{
+	const float h = 0.001;
+	const vec3 k0 = vec3(1.0, -1.0, -1.0);
+	const vec3 k1 = vec3(-1.0, -1.0, 1.0);
+	const vec3 k2 = vec3(-1.0, 1.0, -1.0);
+	const vec3 k3 = vec3(1.0, 1.0, 1.0);
+    return normalize(k0 * sceneSDF(p + k0 * h) +
+                     k1 * sceneSDF(p + k1 * h) +
+                     k2 * sceneSDF(p + k2 * h) +
+                     k3 * sceneSDF(p + k3 * h));
+}
 
 /**
  * Lighting contribution of a single point light source via Phong illumination.
@@ -626,42 +652,33 @@ vec3 mengersponge(in vec3 p)
  *
  * See https://en.wikipedia.org/wiki/Phong_reflection_model#Description
  */
-//vec3 phongContribForLight(vec3 k_d, vec3 k_s, float alpha, vec3 p, vec3 eye,
-//                          vec3 lightPos, vec3 lightIntensity) {
-//    vec3 N = estimateNormal(p);
-//    vec3 L = normalize(lightPos - p);
-//    vec3 V = normalize(eye - p);
-//    vec3 R = normalize(reflect(-L, N));
-//    
-//    float dotLN = dot(L, N);
-//    float dotRV = dot(R, V);
-//    
-//    if (dotLN < 0.0) {
-//        // Light not visible from this point on the surface
-//        return vec3(0.0, 0.0, 0.0);
-//    } 
-//    
-//    if (dotRV < 0.0) {
-//        // Light reflection in opposite direction as viewer, apply only diffuse
-//        // component
-//        return lightIntensity * (k_d * dotLN);
-//    }
-//    return lightIntensity * (k_d * dotLN + k_s * pow(dotRV, alpha));
-//}
+vec3 phongContribForLight(vec3 k_d, vec3 k_s, float alpha, vec3 p, vec3 eye,
+                          vec3 lightPos, vec3 lightIntensity)
+{
+    vec3 N = getNormalFast(p);
+    vec3 L = normalize(lightPos - p);
+    vec3 V = normalize(eye - p);
+    vec3 R = normalize(reflect(-L, N));
+    
+    float dotLN = dot(L, N);
+    float dotRV = dot(R, V);
+    
+    if (dotLN < 0.0)
+	{
+        // Light not visible from this point on the surface
+        return vec3(0.0, 0.0, 0.0);
+    } 
+    
+    if (dotRV < 0.0)
+	{
+        // Light reflection in opposite direction as viewer, apply only diffuse
+        // component
+        return lightIntensity * (k_d * dotLN);
+    }
+    return lightIntensity * (k_d * dotLN + k_s * pow(dotRV, alpha));
+}
 
-/**
- * Lighting via Phong illumination.
- * 
- * The vec3 returned is the RGB color of that point after lighting is applied.
- * k_a: Ambient color
- * k_d: Diffuse color
- * k_s: Specular color
- * alpha: Shininess coefficient
- * p: position of point being lit
- * eye: the position of the camera
- *
- * See https://en.wikipedia.org/wiki/Phong_reflection_model#Description
- */
+// example of use
 //vec3 phongIllumination(vec3 k_a, vec3 k_d, vec3 k_s, float alpha, vec3 p, vec3 eye) {
 //    const vec3 ambientLight = 0.5 * vec3(1.0, 1.0, 1.0);
 //    vec3 color = ambientLight * k_a;
@@ -685,7 +702,6 @@ vec3 mengersponge(in vec3 p)
 //                                  light2Intensity);    
 //    return color;
 //}
-
 // vec3 K_a = vec3(0.2, 0.2, 0.2);
 // vec3 K_d = vec3(0.7, 0.2, 0.2);
 // vec3 K_s = vec3(1.0, 1.0, 1.0);
@@ -748,33 +764,6 @@ float softshadow2(in vec3 ro, in vec3 rd, float mint, float maxt, float k = 2)
         // t += h;
     }
     return res;
-}
-
-// find normal vector of the scene surface
-// classic technique - forward and central differences (6 sceneSDF)
-vec3 getNormal(in vec3 p)
-{
-	float eps = 0.001;
-	return normalize(vec3(
-		sceneSDF(vec3(p.x + eps, p.y, p.z)) - sceneSDF(vec3(p.x - eps, p.y, p.z)),
-		sceneSDF(vec3(p.x, p.y + eps, p.z)) - sceneSDF(vec3(p.x, p.y - eps, p.z)),
-		sceneSDF(vec3(p.x, p.y, p.z  + eps)) - sceneSDF(vec3(p.x, p.y, p.z - eps))
-	));
-}
-
-// find normal vector of the scene surface
-// tetrahedron technique (4 sceneSDF)
-vec3 getNormalFast(in vec3 p)
-{
-	const float h = 0.001;
-	const vec3 k0 = vec3(1.0, -1.0, -1.0);
-	const vec3 k1 = vec3(-1.0, -1.0, 1.0);
-	const vec3 k2 = vec3(-1.0, 1.0, -1.0);
-	const vec3 k3 = vec3(1.0, 1.0, 1.0);
-    return normalize(k0 * sceneSDF(p + k0 * h) +
-                     k1 * sceneSDF(p + k1 * h) +
-                     k2 * sceneSDF(p + k2 * h) +
-                     k3 * sceneSDF(p + k3 * h));
 }
 
 float ambientOcclusion( in vec3 pos, in vec3 nor )
@@ -977,6 +966,27 @@ vec3 interlacedScan(vec3 color, vec2 uv)
 	return color;
 }
 
+// should be in another shader (post shader)
+vec3 chromaticAberration(sampler2D t, vec2 UV)
+{
+	vec2 uv = 1.0 - 2.0 * UV;
+	vec3 c = vec3(0);
+	float rf = 1.0;
+	float gf = 1.0;
+    float bf = 1.0;
+	float f = 1.0 / 8.0;
+	for(int i = 0; i < 8; ++i){
+		c.r += f*texture(t, 0.5-0.5*(uv*rf) ).r;
+		c.g += f*texture(t, 0.5-0.5*(uv*gf) ).g;
+		c.b += f*texture(t, 0.5-0.5*(uv*bf) ).b;
+		rf *= 0.9972;
+		gf *= 0.998;
+        bf /= 0.9988;
+		c = clamp(c,0.0, 1.0);
+	}
+	return c;
+}
+
 // ro - ray origin
 // rd - ray direction
 // return: color of the intersection
@@ -992,13 +1002,17 @@ vec3 render(in vec3 ro, in vec3 rd)
 	// add lights and shadows
 	vec3 lightPos = vec3(20, 50, 0);
 	vec3 lightDir = normalize(lightPos - p);
-	float occ = ambientOcclusion(p, n);
-	float sha = softshadow2(p, lightDir, 0.1, length(lightPos - p), 4.0);
+	float occ = ambientOcclusionReal(p, n);
+	float sha = softshadow2(p, lightDir, 0.01, length(lightPos - p), 4.0);
 	//float sha = shadow(p, lightDir, 0.1, length(lightPos - p));
-	float light = clamp(dot(n, lightDir), 0.0, 1.0);
+	float light = clamp(dot(n, lightDir), 0.0, 1.0); // lambert lighting
 	float sky = clamp(0.5 + 0.5 * n.y, 0.0, 1.0);
 	float ind = clamp(dot(n, normalize(lightDir*vec3(-1.0,0.0,-1.0))), 0.0, 1.0); // indirect lighting
-	vec3 shading = light * vec3(1.64,1.27,0.99) * pow(vec3(sha),vec3(1.0,1.2,1.5));
+	//vec3 shading = light * vec3(1.64,1.27,0.99) * pow(vec3(sha),vec3(1.0,1.2,1.5));
+	vec3 shading = phongContribForLight(
+		vec3(1.64,1.27,0.99), // diffuse
+		vec3(1.0, 1.0, 0.0), 1280.0, // specular
+		p, ro, lightPos, vec3(1.0)) * pow(vec3(sha),vec3(1.0,1.2,1.5));
     shading += sky * vec3(0.16,0.20,0.28) * occ;
     shading += ind * vec3(0.40,0.28,0.20) * occ;
 	
@@ -1013,8 +1027,13 @@ vec3 render(in vec3 ro, in vec3 rd)
 	c = applyScattering(c, ro, p, vec3(0.34, 0.435, 0.57), vec3(2.0), vec3(2.0));
 
 	// color post processing
+	
+	//c = c / (c + 1); // reinhard
+	//vec3 x = max(vec3(0.0), c - 0.004); // filmic curve
+	//c = (x * (6.2 * x + .5)) / (x*(6.2 * x + 1.7) + 0.06);
+	
 	//c = gammaCorrection(c);
-	c = tonemap(c);
+	c = tonemap(c); // uses gamma correction already
 	c = contrast(c);
 
     return c;
