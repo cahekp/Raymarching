@@ -496,6 +496,7 @@ float pReflect(inout vec3 p, vec3 planeNormal, float offset) {
 }
 
 // SHAPES: SIMPLE -----------------------------------------------------
+// (or, more correctly, "distance estimators")
 // return: distance from the surface to the sample point (p)
 
 float plane(vec3 p)
@@ -817,6 +818,7 @@ vec3 gammaCorrection(in vec3 color)
  * Sign indicates whether the point is inside or outside the surface,
  * negative indicating inside.
  */
+// distance field
 float sceneSDF(vec3 p)
 {
 	vec4 c = vec4(1);
@@ -880,9 +882,72 @@ vec3 castRay(in vec3 ro, in vec3 rd)
 	return p;
 }
 
+// find intersection inside a solid geometry using raymarching SDF scene
+vec3 castRayInside(in vec3 ro, in vec3 rd)
+{
+	float depth = ZNEAR;
+	vec3 p = ro + rd * depth;
+	for (int i = 0; i < MAX_MARCHING_STEPS; i++)
+	{
+		// get a distance to the nearest scene's surface
+		float dist = -sceneSDF(p);
+
+		// found intersection?
+		if (dist < 0.001)
+			return p;
+		
+		// move along the view ray
+		depth += dist;
+		p = ro + rd * depth;
+
+		// reached zfar?
+		if (depth >= ZFAR)
+			return ro + rd * ZFAR;
+
+	}
+	return p;
+}
+
+// default, diffuse material
 vec3 getColor(in vec3 p)
 {
 	return vec3(1.0, 1.0, 1.0);
+}
+
+// p - point on glass surface
+// n - glas surface normal
+// rd - view direction vector
+vec3 getColorReflect(in vec3 p, in vec3 n, in vec3 rd)
+{
+	vec3 reflect_dir = reflect(rd, n);
+    vec3 pr = castRay(p + reflect_dir * 0.01 /*must be more than eps*/, reflect_dir);
+    vec3 nr = getNormalFast(pr);
+    
+	// return simple depth texture + material color
+    vec3 c = getColor(pr);
+	c = c * clamp(length(pr - p) / 3.0, 0.0, 1.0);
+	
+	return c;
+}
+
+vec3 getColorRefract(in vec3 p, in vec3 n, in vec3 rd)
+{
+	const float REFRACTION_IDX = 1.52; // glass refraction index
+	
+	// cast ray inside the object
+	vec3 refract_dir = refract(rd, n, 1.0 / REFRACTION_IDX);
+    vec3 pr = castRayInside(p + refract_dir * 0.01, refract_dir);
+    vec3 nr = -getNormalFast(pr);
+
+	// cast ray outside the object
+	refract_dir = refract(refract_dir, nr, 1.0 / REFRACTION_IDX);
+    pr = castRay(pr + refract_dir * 0.01, refract_dir);
+    nr = getNormalFast(pr);
+    
+	// return simple depth texture + material color
+    vec3 c = getColor(pr);
+	c = c * clamp(length(pr - p) / 3.0, 0.0, 1.0);
+	return c;
 }
 
 // DELETE?
@@ -995,9 +1060,9 @@ vec3 render(in vec3 ro, in vec3 rd)
 	// find intersection point and its normal
     vec3 p = castRay(ro, rd);
     vec3 n = getNormalFast(p);
-    
+	
 	// find color of the intersection point
-    vec3 c = getColor(ro);
+    vec3 c = getColorReflect(p, n, rd);
 	
 	// add lights and shadows
 	vec3 lightPos = vec3(20, 50, 0);
