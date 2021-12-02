@@ -1126,6 +1126,21 @@ vec3 calcRayDir(float fieldOfView, vec2 size, vec2 fragCoord) {
     return normalize(vec3(xy, -z));
 }
 
+const float VERTICAL_FOV = 60.f;
+const float PI = 3.1416;
+vec3 computeCameraRay (vec3 eye, vec3 target, vec2 uv) {
+    vec3 look = target - eye;
+    float lookLen = length(look);
+    vec3 xDir = normalize(cross(look, vec3(0, 1, 0)));
+    vec3 yDir = normalize(cross(xDir, look));
+    
+    // Distance to move in world-space to move one unit in screen-space.
+    float unitDist = tan(VERTICAL_FOV/2. * PI/180.) * lookLen;
+    
+    vec3 rayTarget = target + unitDist*(xDir*uv.x + yDir*uv.y);
+    return normalize(rayTarget - eye);
+}
+
 // NO AA
 void main() {
 	vec2 uv = (gl_TexCoord[0].xy - 0.5) * u_resolution / u_resolution.y;
