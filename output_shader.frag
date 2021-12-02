@@ -1073,6 +1073,8 @@ vec3 render(in vec3 ro, in vec3 rd)
 	float light = clamp(dot(n, lightDir), 0.0, 1.0); // lambert lighting
 	float sky = clamp(0.5 + 0.5 * n.y, 0.0, 1.0);
 	float ind = clamp(dot(n, normalize(lightDir*vec3(-1.0,0.0,-1.0))), 0.0, 1.0); // indirect lighting
+	float fre = pow(clamp(1.0 + dot(n, rd), 0.0, 1.0), 2.0); // fresnel effect
+	// (dielectrics reflect from 0.05 to 30 percent of the light, while metals reflect from 55 up to 95 percent)
 	//vec3 shading = light * vec3(1.64,1.27,0.99) * pow(vec3(sha),vec3(1.0,1.2,1.5));
 	vec3 shading = phongContribForLight(
 		vec3(1.64,1.27,0.99), // diffuse
@@ -1080,6 +1082,7 @@ vec3 render(in vec3 ro, in vec3 rd)
 		p, ro, lightPos, vec3(1.0)) * pow(vec3(sha),vec3(1.0,1.2,1.5));
     shading += sky * vec3(0.16,0.20,0.28) * occ;
     shading += ind * vec3(0.40,0.28,0.20) * occ;
+	shading += fre * vec3(1.0,1.0,1.0) * occ;
 	
 	// DOESN'T WORK!
 	//float fresnel = clamp(1.0 + dot(n, rd), 0.0, 1.0);
