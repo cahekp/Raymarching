@@ -1127,9 +1127,21 @@ vec3 calcRayDir(float fieldOfView, vec2 size, vec2 fragCoord) {
 void main() {
 	vec2 uv = (gl_TexCoord[0].xy - 0.5) * u_resolution / u_resolution.y;
 	vec3 rayOrigin = u_pos;
-	vec3 rayDirection = normalize(vec3(uv.x, -uv.y, -1.0));
+	
+	// default perspective projection
+	//vec3 rayDirection = normalize(vec3(uv.x, -uv.y, -1.0));
+	
+	// fisheye
+	float curve_coeff = radians(110.0f /*fov*/) * 0.5;
+	vec3 rayDirection = vec3(0.0, 0.0, -1.0);
+	rayDirection.yz *= rot(-uv.y * curve_coeff);
+	rayDirection.xz *= rot(uv.x * curve_coeff);
+	
+	// rotate camera
 	rayDirection.yz *= rot(-u_mouse.y);
 	rayDirection.xz *= rot(u_mouse.x);
+	
+	// render image
 	vec3 col = render(rayOrigin, rayDirection);
 	col = vignette(col, gl_TexCoord[0].xy);
 	//col = interlacedScan(col, gl_TexCoord[0].xy);
