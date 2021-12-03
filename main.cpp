@@ -2,6 +2,7 @@
 #include <imgui/imgui.h>
 #include <imgui/imgui-SFML.h>
 #include <SFML/Graphics.hpp>
+#include "source/shader_loader.h"
 
 // math
 float clamp01(float v) { return (v < 0.0f) ? 0.0f : ((v > 1.0f) ? 1.0f : v); }
@@ -11,6 +12,8 @@ int main()
 {
 	int w = 1600;
 	int h = 900;
+	float wf = static_cast<float>(w);
+	float hf = static_cast<float>(h);
 	int mouseX = w / 2;
 	int mouseY = h / 2;
 	float mouseSensitivity = 3.0f;
@@ -22,7 +25,7 @@ int main()
 	int framesStill = 1;
 	bool firstFrame = true;
 
-	sf::RenderWindow window(sf::VideoMode(w, h), "Ray marching", sf::Style::Titlebar | sf::Style::Close);
+	sf::RenderWindow window(sf::VideoMode(w, h), "Ray Marching", sf::Style::Titlebar | sf::Style::Close);
 	window.setFramerateLimit(60);
 	window.setMouseCursorVisible(false);
 	ImGui::SFML::Init(window);
@@ -32,18 +35,18 @@ int main()
 	sf::Sprite firstTextureSprite = sf::Sprite(firstTexture.getTexture());
 	sf::Sprite firstTextureSpriteFlipped = sf::Sprite(firstTexture.getTexture());
 	firstTextureSpriteFlipped.setScale(1, -1);
-	firstTextureSpriteFlipped.setPosition(0, h);
+	firstTextureSpriteFlipped.setPosition(0.0f, hf);
 
 	sf::RenderTexture outputTexture;
 	outputTexture.create(w, h);
 	sf::Sprite outputTextureSprite = sf::Sprite(outputTexture.getTexture());
 	sf::Sprite outputTextureSpriteFlipped = sf::Sprite(firstTexture.getTexture());
 	outputTextureSpriteFlipped.setScale(1, -1);
-	outputTextureSpriteFlipped.setPosition(0, h);
+	outputTextureSpriteFlipped.setPosition(0.0f, hf);
 
 	sf::Shader shader;
-	shader.loadFromFile("output_shader.frag", sf::Shader::Fragment);
-	shader.setUniform("u_resolution", sf::Vector2f(w, h));
+	ShaderLoader::loadFromFile("output_shader.frag", sf::Shader::Fragment, shader);
+	shader.setUniform("u_resolution", sf::Vector2f(wf, hf));
 
 	std::random_device rd;
 	std::mt19937 e2(rd());
@@ -60,8 +63,6 @@ int main()
 			if (mouseHidden)
 			{
 				ImGui::SetMouseCursor(ImGuiMouseCursor_None);
-				//io.MouseDrawCursor = false;
-				//window.setMouseCursorVisible(false);
 			}
 
 			if (event.type == sf::Event::Closed)
@@ -118,8 +119,8 @@ int main()
 		ImGui::Text("FPS: %.1f", smooth_fps);
 		if (ImGui::Button("Reload shader"))
 		{
-			shader.loadFromFile("output_shader.frag", sf::Shader::Fragment);
-			shader.setUniform("u_resolution", sf::Vector2f(w, h));
+			ShaderLoader::loadFromFile("output_shader.frag", sf::Shader::Fragment, shader);
+			shader.setUniform("u_resolution", sf::Vector2f(wf, hf));
 			firstFrame = true;
 		}
 
