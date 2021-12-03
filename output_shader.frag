@@ -11,14 +11,68 @@ uniform float u_sample_part;
 uniform vec2 u_seed1;
 uniform vec2 u_seed2;
 
-const float ZNEAR = 0;
+const float ZNEAR = 0.02;
 const float ZFAR = 50;
 const int MAX_MARCHING_STEPS = 128;
 
-// forward declarations
-float sceneSDF(vec3 p);
+// MATERIALS -----------------------------------------------------------
+
+// define material structure
+struct Material
+{
+    vec3 diffuse;
+    vec3 specular;
+    float shininess;
+    float reflectivity;
+};
+
+Material blendMaterial(Material a, Material b, float k)
+{
+    return Material(
+        mix(a.diffuse, b.diffuse, k),
+        mix(a.specular, b.specular, k),
+        mix(a.shininess, b.shininess, k),
+        mix(a.reflectivity, b.reflectivity, k)
+    );
+}
 
 // OPERATIONS ----------------------------------------------------------
+
+struct SdResult
+{
+    float dist; // distance to the scene's nearest surface
+    Material mat; // material of nearest point on the surface
+};
+
+// forward declarations
+SdResult sceneSDF(vec3 p);
+
+SdResult sdUnion(SdResult a, SdResult b)
+{
+    if (a.dist < b.dist) return a; else return b;
+}
+
+// k.x is the factor used for blending shape; ky is the factor for blending material.
+SdResult sminCubic(SdResult a, SdResult b, vec2 k) {
+    k = max(k, 0.0001);
+    vec2 h = max(k - abs(a.dist - b.dist), 0.0)/k;
+    vec2 m = h * h * h * 0.5;
+    vec2 s = m * k * (1.0 / 3.0);
+    
+    SdResult res;
+    bool aCloser = a.dist < b.dist;
+    res.dist = (aCloser ? a.dist : b.dist) - s.x;
+    float blendCoeff = aCloser ? m.y : 1.0-m.y;
+    
+    res.mat = blendMaterial(a.mat, b.mat, blendCoeff);
+    return res;
+}
+
+SdResult sminCubic(SdResult a, SdResult b, float k) {
+    return sminCubic (a, b, vec2(k));
+}
+
+// -------------------------------------------------
 
 float opUnion(float d1, float d2)
 {
@@ -616,9 +670,9 @@ vec3 getNormal(in vec3 p)
 {
 	float eps = 0.001;
 	return normalize(vec3(
-		sceneSDF(vec3(p.x + eps, p.y, p.z)) - sceneSDF(vec3(p.x - eps, p.y, p.z)),
-		sceneSDF(vec3(p.x, p.y + eps, p.z)) - sceneSDF(vec3(p.x, p.y - eps, p.z)),
-		sceneSDF(vec3(p.x, p.y, p.z  + eps)) - sceneSDF(vec3(p.x, p.y, p.z - eps))
+		sceneSDF(vec3(p.x + eps, p.y, p.z)).dist - sceneSDF(vec3(p.x - eps, p.y, p.z)).dist,
+		sceneSDF(vec3(p.x, p.y + eps, p.z)).dist - sceneSDF(vec3(p.x, p.y - eps, p.z)).dist,
+		sceneSDF(vec3(p.x, p.y, p.z  + eps)).dist - sceneSDF(vec3(p.x, p.y, p.z - eps)).dist
 	));
 }
 
@@ -631,10 +685,10 @@ vec3 getNormalFast(in vec3 p)
 	const vec3 k1 = vec3(-1.0, -1.0, 1.0);
 	const vec3 k2 = vec3(-1.0, 1.0, -1.0);
 	const vec3 k3 = vec3(1.0, 1.0, 1.0);
-    return normalize(k0 * sceneSDF(p + k0 * h) +
-                     k1 * sceneSDF(p + k1 * h) +
-                     k2 * sceneSDF(p + k2 * h) +
-                     k3 * sceneSDF(p + k3 * h));
+    return normalize(k0 * sceneSDF(p + k0 * h).dist +
+                     k1 * sceneSDF(p + k1 * h).dist +
+                     k2 * sceneSDF(p + k2 * h).dist +
+                     k3 * sceneSDF(p + k3 * h).dist);
 }
 
 /**
@@ -719,7 +773,7 @@ float shadow(in vec3 ro, in vec3 rd, float mint, float maxt)
 {
     for (float t = mint; t < maxt;)
     {
-        float d = sceneSDF(ro + rd * t);
+        float d = sceneSDF(ro + rd * t).dist;
         if (d < 0.001)
             return 0.0;
         t += d;
@@ -734,7 +788,7 @@ float softshadow(in vec3 ro, in vec3 rd, float mint, float maxt, float k = 2)
     float res = 1.0;
     for (float t = mint; t < maxt;)
     {
-        float d = sceneSDF(ro + rd * t);
+        float d = sceneSDF(ro + rd * t).dist;
         if (d < 0.001)
             return 0.0;
         res = min(res, k * d / t);
@@ -750,7 +804,7 @@ float softshadow2(in vec3 ro, in vec3 rd, float mint, float maxt, float k = 2)
     float ph = 1e20;
     for (float t = mint; t < maxt;)
     {
-        float h = sceneSDF(ro + rd * t);
+        float h = sceneSDF(ro + rd * t).dist;
         if (h < 0.001)
             return 0.0;
         float y = h * h / (2.0 * ph);
@@ -774,7 +828,7 @@ float ambientOcclusion( in vec3 pos, in vec3 nor )
     for( int i=0; i<5; i++ )
     {
         float h = 0.01 + 0.12*float(i)/4.0;
-        float d = sceneSDF( pos + h*nor );
+        float d = sceneSDF( pos + h*nor ).dist;
         occ += (h-d)*sca;
         sca *= 0.95;
         if( occ>0.35 ) break;
@@ -796,7 +850,7 @@ float ambientOcclusionReal(vec3 pos, vec3 normal)
     for (int i = 0; i < _AOSteps; i ++)
     {
         vec3 p = pos + normal * (i+1) * _AOStepSize;
-        sum    += 1. / pow(2., i) * sceneSDF(p);
+        sum    += 1. / pow(2., i) * sceneSDF(p).dist;
         maxSum += 1. / pow(2., i) * (i+1) * _AOStepSize;
     }
     return sum / maxSum;
@@ -810,47 +864,31 @@ vec3 gammaCorrection(in vec3 color)
 }
 
 // SCENE ---------------------------------------------------------------
-
-/**
- * Signed distance function describing the scene.
- * 
- * Absolute value of the return value indicates the distance to the surface.
- * Sign indicates whether the point is inside or outside the surface,
- * negative indicating inside.
- */
-// distance field
-float sceneSDF(vec3 p)
-{
-	vec4 c = vec4(1);
-	//float dist0 = mandelbulb(transformTRS1(p, vec3(0, 2, 0), vec3(u_time * 0.5, 0, 45), 1.5), c) * 1.5;
-	
-	
-	//float dist0 = mandelbulb(transformRS1(p - vec3(0, 2, 0), vec3(180, u_time * 2, 0), 1.5), c) * 1.5;
-	float dist0 = mengersponge(transformR(p - vec3(0, 3, 0), vec3(180, u_time * 2, 0))).x;
-	
-	float dist1 = sphere(vec4(0, 0, 2, 1), p);
-	//float dist1 = sphere(vec4(0, 1.5, 0, 1), p / 1.2) * 1.2;
-	float dist2 = cube(vec4(0, 0, 0, 1), p);
-	float dist3 = plane(p);
-	return smin(dist0, smin(smin(dist1, dist2, 0.5), dist3, 0.5), 0.33);
-}
-
 // ---------------------------------------------------------------------
 
-// DELETE?
-float raymarchLight(vec3 ro, vec3 rd)
+// returns the distance to the intersection with the scene, or -1 if no intersection is found
+SdResult castRayD(in vec3 ro, in vec3 rd)
 {
-	float dO = 0;
-	float md = 1;
-	for (int i = 0; i < 20; i++)
+    float depth = ZNEAR;
+    for (int i = 0; i < MAX_MARCHING_STEPS; i++)
 	{
-		vec3 p = ro + rd * dO;
-		float dS = sceneSDF(p);
-		md = min(md, dS);
-		dO += dS;
-		if(dO > 50 || dS < 0.1) break;
-	}
-	return md;
+        vec3 pos = ro + rd * depth;
+        SdResult res = sceneSDF(pos);
+        //if (res.dist / depth < 0.001)
+		if (res.dist < 0.001)
+		{
+			res.dist = depth;
+			return res;
+		}
+        
+        depth += res.dist;
+		if (depth > ZFAR)
+		{
+			res.dist = -1.0;
+			return res;
+		}
+    }
+    return SdResult(depth, Material(vec3(0.2, 0.02, 0.02), vec3(0.04, 0.02, 0.02), 32.0, 0.0));
 }
 
 // find intersection using raymarching SDF scene
@@ -864,7 +902,7 @@ vec3 castRay(in vec3 ro, in vec3 rd)
 	for (int i = 0; i < MAX_MARCHING_STEPS; i++)
 	{
 		// get a distance to the nearest scene's surface
-		float dist = sceneSDF(p);
+		float dist = sceneSDF(p).dist;
 
 		// found intersection?
 		if (dist < 0.001)
@@ -890,7 +928,7 @@ vec3 castRayInside(in vec3 ro, in vec3 rd)
 	for (int i = 0; i < MAX_MARCHING_STEPS; i++)
 	{
 		// get a distance to the nearest scene's surface
-		float dist = -sceneSDF(p);
+		float dist = -sceneSDF(p).dist;
 
 		// found intersection?
 		if (dist < 0.001)
@@ -948,25 +986,6 @@ vec3 getColorRefract(in vec3 p, in vec3 n, in vec3 rd)
     vec3 c = getColor(pr);
 	c = c * clamp(length(pr - p) / 3.0, 0.0, 1.0);
 	return c;
-}
-
-// DELETE?
-vec3 shade(vec3 o, vec3 p, vec3 n, vec3 lo)
-{
-    vec3 l = normalize(lo - p);
-	
-	// add light
-	float dif = clamp(dot(n, l) * 0.5 + 0.5, 0, 1);
-	float d = raymarchLight(p + n * 0.1 * 10, l);
-	d += 1;
-	d = clamp(d, 0, 1);
-	dif *= d;
-	vec3 col = vec3(dif, dif, dif);
-	
-    float sh = softshadow(p, l, 0.1, length(lo - p), 4.0);
-	vec3 cshadow = pow( vec3(sh), vec3(1.0, 1.2, 1.5) );
-	
-    return mix(cshadow, col, sh);
 }
 
 vec3 applyFog(in vec3 color, in vec3 ro, in vec3 p, in vec3 fog_color)
@@ -1052,60 +1071,7 @@ vec3 chromaticAberration(sampler2D t, vec2 UV)
 	return c;
 }
 
-// ro - ray origin
-// rd - ray direction
-// return: color of the intersection
-vec3 render(in vec3 ro, in vec3 rd)
-{
-	// find intersection point and its normal
-    vec3 p = castRay(ro, rd);
-    vec3 n = getNormalFast(p);
-	
-	// find color of the intersection point
-    vec3 c = getColorReflect(p, n, rd);
-	
-	// add lights and shadows
-	vec3 lightPos = vec3(20, 50, 0);
-	vec3 lightDir = normalize(lightPos - p);
-	float occ = ambientOcclusionReal(p, n);
-	float sha = softshadow2(p, lightDir, 0.01, length(lightPos - p), 4.0);
-	//float sha = shadow(p, lightDir, 0.1, length(lightPos - p));
-	float light = clamp(dot(n, lightDir), 0.0, 1.0); // lambert lighting
-	float sky = clamp(0.5 + 0.5 * n.y, 0.0, 1.0);
-	float ind = clamp(dot(n, normalize(lightDir*vec3(-1.0,0.0,-1.0))), 0.0, 1.0); // indirect lighting
-	float fre = pow(clamp(1.0 + dot(n, rd), 0.0, 1.0), 2.0); // fresnel effect
-	// (dielectrics reflect from 0.05 to 30 percent of the light, while metals reflect from 55 up to 95 percent)
-	//vec3 shading = light * vec3(1.64,1.27,0.99) * pow(vec3(sha),vec3(1.0,1.2,1.5));
-	vec3 shading = phongContribForLight(
-		vec3(1.64,1.27,0.99), // diffuse
-		vec3(1.0, 1.0, 0.0), 1280.0, // specular
-		p, ro, lightPos, vec3(1.0)) * pow(vec3(sha),vec3(1.0,1.2,1.5));
-    shading += sky * vec3(0.16,0.20,0.28) * occ;
-    shading += ind * vec3(0.40,0.28,0.20) * occ;
-	shading += fre * vec3(1.0,1.0,1.0) * occ;
-	
-	// DOESN'T WORK!
-	//float fresnel = clamp(1.0 + dot(n, rd), 0.0, 1.0);
-	//shading += 25.0 * fresnel * fresnel * occ;
-	
-	c = c * shading;
-
-	// add fog/haze
-	//c = applyFog(c, ro, p, vec3(0.34, 0.435, 0.57));
-	c = applyScattering(c, ro, p, vec3(0.34, 0.435, 0.57), vec3(2.0), vec3(2.0));
-
-	// color post processing
-	
-	//c = c / (c + 1); // reinhard
-	//vec3 x = max(vec3(0.0), c - 0.004); // filmic curve
-	//c = (x * (6.2 * x + .5)) / (x*(6.2 * x + 1.7) + 0.06);
-	
-	//c = gammaCorrection(c);
-	c = tonemap(c); // uses gamma correction already
-	c = contrast(c);
-
-    return c;
-}
+// ----------------------------------------------------------------------
 
 mat2 rot(float a) {
 	float s = sin(a);
@@ -1141,8 +1107,158 @@ vec3 computeCameraRay (vec3 eye, vec3 target, vec2 uv) {
     return normalize(rayTarget - eye);
 }
 
+/////////////////////////////////////////////////////////////////////////
+
+const Material red = Material(vec3(0.2, 0.02, 0.02), vec3(0.04, 0.02, 0.02), 32.0, 0.0);
+const Material green = Material(vec3(0.02, 0.2, 0.02), vec3(0.02, 0.04, 0.02), 32.0, 0.0);
+const Material blue = Material(vec3(0.02, 0.02, 0.2), vec3(0.02, 0.02, 0.04), 32.0, 0.0);
+const Material mirror = Material(vec3(0.01), vec3(0.09), 64., 0.9);
+Material floorMat(vec3 pos)
+{
+    vec3 white = vec3(0.3);
+    vec3 black = vec3(0.025);
+    
+    float smoothstepSize = 0.005;
+    float scale = max(10., pow(length(pos), 1.3));
+    vec2 tile2D = smoothstep(-smoothstepSize, smoothstepSize, sin(pos.xz * PI) / scale);
+    float tile = min(max(tile2D.x, tile2D.y), max(1.-tile2D.x,1.-tile2D.y)); // Fuzzy xor.
+    vec3 color = mix(white, black, tile);
+    
+    return Material(color,vec3(0.03), 128.0, 0.0);
+}
+
+/**
+ * Signed distance function describing the scene.
+ * 
+ * Absolute value of the return value indicates the distance to the surface.
+ * Sign indicates whether the point is inside or outside the surface,
+ * negative indicating inside.
+ */
+// distance field
+SdResult sceneSDF(vec3 p)
+{
+	vec4 c = vec4(1);
+	//SdResult dist0 = SdResult(mandelbulb(transformRS1(p - vec3(0, 2, 0), vec3(180, u_time * 2, 0), 1.5), c) * 1.5, mirror);
+	SdResult dist0 = SdResult(mengersponge(transformR(p - vec3(0, 3, 0), vec3(180, u_time * 2, 0))).x, mirror);
+	
+	SdResult dist1 = SdResult(sphere(vec4(0, 0, 2, 1), p), red);
+	SdResult dist2 = SdResult(cube(vec4(0, 0, 0, 1), p), blue);
+	SdResult dist3 = SdResult(plane(p), floorMat(p));
+	return sminCubic(dist0, sminCubic(sminCubic(dist1, dist2, 0.5), dist3, 0.5), 0.33);
+}
+
+vec3 distantPointLight(vec3 lightDir, vec3 lightCol, float lightApparentSize, Material mat, vec3 pos, vec3 rd, vec3 norm)
+{
+    vec3 halfVec = normalize(lightDir - rd);
+    
+    vec3 diffuse = mat.diffuse * clamp(dot(norm, lightDir), 0., 1.);
+    vec3 specular = mat.specular * pow(clamp(dot(norm, halfVec), 0., 1.), mat.shininess);
+    // Normalization from http://www.thetenthplanet.de/archives/255.
+    float specNormalization = (mat.shininess  + 2.) / (4. * (2. - pow(2., -mat.shininess/2.)));
+    
+    return lightCol * softshadow2(pos, lightDir, 0.01, 10.0) * (diffuse + specular*specNormalization);
+}
+
+vec3 light(Material mat, vec3 p, vec3 n, vec3 rd)
+{
+    float occlusion = 1.; // TODO: Some kind of occlusion.
+    
+    vec3 res = vec3(0);
+    
+    vec3 sunDir = normalize(vec3(1,0.75,0.5));
+    vec3 sunCol = vec3(2);
+    float sunApparentSize = 0.047; // The physically correct number is 0.0047, but softer shadows are fun.
+    res += distantPointLight(sunDir, sunCol, sunApparentSize, mat, p, rd, n);
+    
+    vec3 ambient = vec3(0.05) * occlusion;
+    res += ambient * mat.diffuse;
+    
+    return res;
+}
+
+const float REFLECTION_EPS = 0.001;
+const int MAX_REFLECTIONS = 3; // Maximum number of reflections. Total number of casts = 1+MAX_REFLECTIONS
+
+// ro - ray origin
+// rd - ray direction
+// return: color of the intersection
+vec3 render(in vec3 ro, in vec3 rd)
+{
+	vec3 color = vec3(0);
+    float transmittance = 1.0;
+	
+	for (int i = 0; i <= MAX_REFLECTIONS; i++)
+	{
+		// find intersection point and its normal
+		SdResult sd = castRayD(ro, rd);
+		if (sd.dist > 0.0)
+		{
+			vec3 p = ro + rd * sd.dist;
+			vec3 n = getNormalFast(p);
+			
+			color += transmittance * light(sd.mat, p, n, rd);
+			transmittance *= pow(sd.mat.reflectivity, 4.0);
+			ro = p + n * 0.001;
+			rd = reflect(rd, n);
+			
+			if (transmittance < REFLECTION_EPS)
+				break;
+			
+			// TODO: Render light sources as a specular reflection directly on the camera.
+			
+//			vec3 p = ro + rd * dist;
+//			vec3 n = getNormalFast(p);
+//			
+//			// find color of the intersection point
+//			color = getColorReflect(p, n, rd);
+//			
+//			// add lights and shadows
+//			vec3 lightPos = vec3(20, 50, 0);
+//			vec3 lightDir = normalize(lightPos - p);
+//			float occ = ambientOcclusionReal(p, n);
+//			float sha = softshadow2(p, lightDir, 0.01, length(lightPos - p), 4.0);
+//			//float sha = shadow(p, lightDir, 0.1, length(lightPos - p));
+//			float light = clamp(dot(n, lightDir), 0.0, 1.0); // lambert lighting
+//			float sky = clamp(0.5 + 0.5 * n.y, 0.0, 1.0);
+//			float ind = clamp(dot(n, normalize(lightDir*vec3(-1.0,0.0,-1.0))), 0.0, 1.0); // indirect lighting
+//			float fre = pow(clamp(1.0 + dot(n, rd), 0.0, 1.0), 2.0); // fresnel effect
+//			// (dielectrics reflect from 0.05 to 30 percent of the light, while metals reflect from 55 up to 95 percent)
+//			//vec3 shading = light * vec3(1.64,1.27,0.99) * pow(vec3(sha),vec3(1.0,1.2,1.5));
+//			vec3 shading = phongContribForLight(
+//				vec3(1.64,1.27,0.99), // diffuse
+//				vec3(1.0, 1.0, 0.0), 1280.0, // specular
+//				p, ro, lightPos, vec3(1.0)) * pow(vec3(sha),vec3(1.0,1.2,1.5));
+//			shading += sky * vec3(0.16,0.20,0.28) * occ;
+//			shading += ind * vec3(0.40,0.28,0.20) * occ;
+//			shading += fre * vec3(1.0,1.0,1.0) * occ;
+//			
+//			// DOESN'T WORK!
+//			//float fresnel = clamp(1.0 + dot(n, rd), 0.0, 1.0);
+//			//shading += 25.0 * fresnel * fresnel * occ;
+//			
+//			color = color * shading;
+//
+//			// add fog/haze
+//			//color = applyFog(color, ro, p, vec3(0.34, 0.435, 0.57));
+//			color = applyScattering(color, ro, p, vec3(0.34, 0.435, 0.57), vec3(2.0), vec3(2.0));
+		}
+		else
+		{
+			// skybox
+			vec3 skyLight = vec3(0.4, 0.4, 0.8);
+            vec3 skyDark = vec3(0.1, 0.1, 0.4);
+            vec3 skyColor = mix(skyDark, skyLight, rd.y);
+            color += transmittance * skyColor;
+			break;
+		}
+	}
+	
+    return color;
+}
+
 // NO AA
-void main() {
+void main()
+{
 	vec2 uv = (gl_TexCoord[0].xy - 0.5) * u_resolution / u_resolution.y;
 	vec3 rayOrigin = u_pos;
 	
@@ -1161,13 +1277,23 @@ void main() {
 	
 	// render image
 	vec3 col = render(rayOrigin, rayDirection);
+	
+	// post processing
+	//col = col / (col + 1); // reinhard
+	//vec3 x = max(vec3(0.0), col - 0.004); // filmic curve
+	//col = (x * (6.2 * x + .5)) / (x*(6.2 * x + 1.7) + 0.06);
+	//col = gammaCorrection(col);
+	col = tonemap(col); // uses gamma correction already
+	col = contrast(col);
 	col = vignette(col, gl_TexCoord[0].xy);
 	//col = interlacedScan(col, gl_TexCoord[0].xy);
+	
 	gl_FragColor = vec4(col, 1.0);
 }
 
 // SSAA (2x)
-//void main() {
+//void main()
+//{
 //	vec3 sum_col = vec3(0.0);
 //	int AA = 2;
 //	for (int jj=0; jj<AA; jj++)
