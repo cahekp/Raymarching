@@ -19,10 +19,19 @@ const int MAX_MARCHING_STEPS = 128;
 // define material structure
 struct Material
 {
-    vec3 diffuse;
-    vec3 specular;
-    float shininess;
-    float reflectivity;
+	vec3 diffuse;
+	
+	vec3 specular;
+	float shininess;
+	
+	float reflectivity;
+	
+	float transparency;
+	//vec3 absorption;
+	
+//	float fR0; // 0.0 - water, 1.0 - mirror
+//	float transparency;
+//	float refraction;
 };
 
 Material blendMaterial(Material a, Material b, float k)
@@ -31,7 +40,12 @@ Material blendMaterial(Material a, Material b, float k)
         mix(a.diffuse, b.diffuse, k),
         mix(a.specular, b.specular, k),
         mix(a.shininess, b.shininess, k),
-        mix(a.reflectivity, b.reflectivity, k)
+        mix(a.reflectivity, b.reflectivity, k),
+		mix(a.transparency, b.transparency, k)
+		
+//		mix(a.fR0, b.fR0, k),
+//		mix(a.transparency, b.transparency, k),
+//		mix(a.refraction, b.refraction, k)
     );
 }
 
@@ -883,6 +897,30 @@ SdResult castRayD(in vec3 ro, in vec3 rd)
     return res;
 }
 
+SdResult castRayDI(in vec3 ro, in vec3 rd)
+{
+	SdResult res;
+    float depth = ZNEAR;
+    for (int i = 0; i < MAX_MARCHING_STEPS; i++)
+	{
+        res = sceneSDF(ro + rd * depth);
+		
+		if (-res.dist < 0.001 * depth /* a little bit of optimization */)
+		{
+			res.dist = depth;
+			return res;
+		}
+        
+        depth -= res.dist;
+		if (depth >= ZFAR)
+		{
+			res.dist = -1.0;
+			return res;
+		}
+    }
+    return res;
+}
+
 // find intersection using raymarching SDF scene
 // ro - ray origin
 // rd - ray direction
@@ -1009,7 +1047,7 @@ vec3 tonemap(in vec3 color)
 	return col;
 }
 
-// INCORRECT!
+// INCORRECT! OR CORRECT?
 // use this function after gamma correction pass
 vec3 brightness(in vec3 color, float value = 0.9)
 {
