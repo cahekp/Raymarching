@@ -1,5 +1,5 @@
-#version 130
-#extension GL_ARB_gpu_shader5 : enable // enable inverse() func
+//#version 130
+//#extension GL_ARB_gpu_shader5 : enable // enable inverse() func
 
 uniform vec2 u_resolution;
 uniform vec2 u_mouse;
@@ -867,8 +867,7 @@ SdResult castRayD(in vec3 ro, in vec3 rd)
 	{
         res = sceneSDF(ro + rd * depth);
 		
-		//if (res.dist < 0.001)
-		if (res.dist / depth < 0.001)			
+		if (res.dist < 0.001 * depth /* a little bit of optimization */)
 		{
 			res.dist = depth;
 			return res;

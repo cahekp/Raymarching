@@ -60,6 +60,8 @@ int main()
 	std::mt19937 e2(rd());
 	std::uniform_real_distribution<> dist(0.0f, 1.0f);
 
+	bool time_freeze = false;
+
 	sf::Clock delta_clock;
 	while (window.isOpen())
 	{
@@ -137,6 +139,7 @@ int main()
 			post_shader.setUniform("u_resolution", sf::Vector2f(wf, hf));
 			firstFrame = true;
 		}
+		ImGui::Checkbox("Time Freeze", &time_freeze);
 
 		if (mouseHidden || firstFrame)
 		{
@@ -179,7 +182,8 @@ int main()
 			shader.setUniform("u_pos", pos);
 			shader.setUniform("u_mouse", sf::Vector2f(mx, my));
 		}
-		shader.setUniform("u_time", clock.getElapsedTime().asSeconds());
+		if (!time_freeze)
+			shader.setUniform("u_time", clock.getElapsedTime().asSeconds());
 		shader.setUniform("u_sample_part", 1.0f / framesStill);
 		shader.setUniform("u_seed1", sf::Vector2f((float)dist(e2), (float)dist(e2)) * 999.0f);
 		shader.setUniform("u_seed2", sf::Vector2f((float)dist(e2), (float)dist(e2)) * 999.0f);

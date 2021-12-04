@@ -1,3 +1,11 @@
+#version 130
+#define USE_MATERIAL_ID
+#define USE_MATERIAL_DIFFUSE
+#define USE_MATERIAL_SPECULAR
+#define USE_MATERIAL_SHININESS
+#define USE_MATERIAL_REFLECTIVITY
+#define USE_MATERIAL_REFRACTIVITY
+#define ALLOW_MATERIAL_BLENDING
 #include "common.frag"
 
 const Material red = Material(vec3(0.2, 0.02, 0.02), vec3(0.04, 0.02, 0.02), 32.0, 0.0);
@@ -110,8 +118,7 @@ vec3 render(in vec3 ro, in vec3 rd)
 			vec3 skyLight = vec3(0.4, 0.4, 0.8);
             vec3 skyDark = vec3(0.1, 0.1, 0.4);
             vec3 skyColor = mix(skyDark, skyLight, rd.y);
-            //color += transmittance * skyColor;
-			color = applyScattering(transmittance * color, ro, ro + rd * ZFAR, vec3(0.34, 0.435, 0.57), vec3(2.0), vec3(2.0));
+			color += transmittance * applyScattering(color, ro, ro + rd * ZFAR, vec3(0.34, 0.435, 0.57), vec3(2.0), vec3(2.0));
 			break;
 		}
 	}
