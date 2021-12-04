@@ -3,7 +3,7 @@
 const Material red = Material(vec3(0.2, 0.02, 0.02), vec3(0.04, 0.02, 0.02), 32.0, 0.0);
 const Material green = Material(vec3(0.02, 0.2, 0.02), vec3(0.02, 0.04, 0.02), 32.0, 0.0);
 const Material blue = Material(vec3(0.02, 0.02, 0.2), vec3(0.02, 0.02, 0.04), 32.0, 0.0);
-const Material mirror = Material(vec3(0.1), vec3(0.09), 64., 0.5);
+const Material mirror = Material(vec3(0.1), vec3(0.09), 64., 0.15);
 Material floorMat(vec3 pos)
 {
     vec3 white = vec3(0.3);
@@ -96,7 +96,7 @@ vec3 render(in vec3 ro, in vec3 rd)
 			
 			color += transmittance * light(sd.mat, ro, rd, p, n);
 			
-			transmittance *= pow(sd.mat.reflectivity, 4.0);
+			transmittance *= pow(sd.mat.reflectivity, 2.0);
 			if (transmittance < REFLECTION_EPS)
 				break;
 
@@ -110,8 +110,8 @@ vec3 render(in vec3 ro, in vec3 rd)
 			vec3 skyLight = vec3(0.4, 0.4, 0.8);
             vec3 skyDark = vec3(0.1, 0.1, 0.4);
             vec3 skyColor = mix(skyDark, skyLight, rd.y);
-            color += transmittance * skyColor;
-			//color = applyScattering(color, ro, ro + rd * ZFAR, vec3(0.34, 0.435, 0.57), vec3(2.0), vec3(2.0));
+            //color += transmittance * skyColor;
+			color = applyScattering(transmittance * color, ro, ro + rd * ZFAR, vec3(0.34, 0.435, 0.57), vec3(2.0), vec3(2.0));
 			break;
 		}
 	}

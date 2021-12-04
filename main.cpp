@@ -44,9 +44,17 @@ int main()
 	outputTextureSpriteFlipped.setScale(1, -1);
 	outputTextureSpriteFlipped.setPosition(0.0f, hf);
 
+	sf::RenderTexture postTexture;
+	postTexture.create(w, h);
+	sf::Sprite postTextureSprite(postTexture.getTexture());
+
 	sf::Shader shader;
 	ShaderLoader::loadFromFile("output_shader.frag", sf::Shader::Fragment, shader);
 	shader.setUniform("u_resolution", sf::Vector2f(wf, hf));
+
+	sf::Shader post_shader;
+	ShaderLoader::loadFromFile("post.frag", sf::Shader::Fragment, post_shader);
+	post_shader.setUniform("u_resolution", sf::Vector2f(wf, hf));
 
 	std::random_device rd;
 	std::mt19937 e2(rd());
@@ -123,6 +131,12 @@ int main()
 			shader.setUniform("u_resolution", sf::Vector2f(wf, hf));
 			firstFrame = true;
 		}
+		if (ImGui::Button("Reload post shader"))
+		{
+			ShaderLoader::loadFromFile("post.frag", sf::Shader::Fragment, post_shader);
+			post_shader.setUniform("u_resolution", sf::Vector2f(wf, hf));
+			firstFrame = true;
+		}
 
 		if (mouseHidden || firstFrame)
 		{
@@ -174,14 +188,18 @@ int main()
 		{
 			shader.setUniform("u_sample", firstTexture.getTexture());
 			outputTexture.draw(firstTextureSpriteFlipped, &shader);
-			window.draw(outputTextureSprite);
+			//window.draw(outputTextureSprite);
 		}
 		else
 		{
 			shader.setUniform("u_sample", outputTexture.getTexture());
 			firstTexture.draw(outputTextureSpriteFlipped, &shader);
-			window.draw(firstTextureSprite);
+			//window.draw(firstTextureSprite);
 		}
+
+		post_shader.setUniform("u_main_tex", framesStill % 2 == 1 ? outputTexture.getTexture() : firstTexture.getTexture());
+		postTexture.draw(postTextureSprite, &post_shader);
+		window.draw(postTextureSprite);
 
 		ImGui::SFML::Render(window);
 
