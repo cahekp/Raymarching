@@ -94,7 +94,7 @@ vec3 background(vec3 ro, vec3 rd)
 #define OBJECT_DIFFUSE      vec3(0.0)
 #define OBJECT_SPECPOWER    0.0
 #define OBJECT_REFLECTIVITY 0.01 // How reflective the object is. regardless of fresnel.
-#define OBJECT_ABSORB       vec3(2.0, 2.0, 0.75) // for beers law
+#define OBJECT_ABSORB       vec3(2.0, 2.0, 0.75) * 0.2 // for beers law
 
 // http://en.wikipedia.org/wiki/Schlick's_approximation
 float Schlick( const in vec3 vHalf, const in vec3 vView, const in float fR0, const in float fSmoothFactor)
@@ -187,85 +187,49 @@ vec3 renderReflection(in vec3 ro, in vec3 rd, float reflectivity)
 	//}	
 }
 
+#define MAX_REFRACTION 3
 vec3 renderRefraction(in vec3 ro, in vec3 rd)
 {
-	// first pass: trace until outside the transparent object
-	SdResult sd = castRayDI(ro, rd);
-	if (sd.dist < 0.0) // when does it happen? when the object's size bigger than ZFAR
-		return OBJECT_ABSORB;
-
-	// p - ray-surface intersection point
-	// n - normal of the surface
-	vec3 p = ro + rd * sd.dist;
-	vec3 n = -getNormalFast(p);
-	
-	// beer's law absorption
-	vec3 absorb = exp(-OBJECT_ABSORB * sd.dist);
-	
-	// second pass: trace rest of the scene
-	ro = p + rd * 0.001;
-	rd = refract(rd, n, REFRACTIVE_INDEX_INSIDE);
-	sd = castRayD(ro, rd);
-	if (sd.dist > 0.0) // render scene
+	vec3 color = vec3(0);
+	float invert = -1.0; // -1.0 - inside the object, 1.0 - outside
+	float absorb_dist = 0.0;
+	for (int i = 0; i < MAX_REFRACTION; i++)
 	{
+		SdResult sd;
+		if (invert < 0.0)
+			sd = castRayDI(ro, rd);
+		else
+			sd = castRayD(ro, rd);
+		
+		if (invert > 0.0)
+			absorb_dist += sd.dist;
+		
+		// render background
+		if (sd.dist < 0.0)
+		{
+			if (invert > 0.0)
+				absorb_dist = ZFAR;
+			break;
+		}
+	
 		// p - ray-surface intersection point
 		// n - normal of the surface
 		vec3 p = ro + rd * sd.dist;
-		vec3 n = getNormalFast(p);
-		
-		// light the surface
-		return light(sd.mat, ro, rd, p, n) * absorb;
-	}
-	else // render background
-	{
-		return background(ro, rd) * absorb;
-	}
-	
-	// ------------------------------------------------------------------------------
-	
+		vec3 n = getNormalFast(p) * invert;
 
-//    // bounce around inside the object as many times as needed (or until max bounces) due total internal reflection
-//    float multiplier = 1.0;
-//    vec3 ret = vec3(0.0);
-//    float absorb_dist = 0.0;
-//	for (int i = 0; i < MAX_RAY_BOUNCES; ++i)
-//    {
-//        // find intersection inside the object
-//		SdResult sd = castRayDI(ro, rd);
-//
-//		// p - ray-surface intersection point (inside the object)
-//		// n - normal of the surface
-//		vec3 p = ro + rd * sd.dist;
-//		vec3 n = getNormalFast(p);
-//        
-//        // calculate beer's law absorption
-//        absorb_dist += sd.dist;
-//        vec3 absorb = exp(-OBJECT_ABSORB * absorb_dist);
-//        
-//        // calculate how much to reflect or transmit (refract or diffuse)
-//        float reflect_factor = fresnelReflectAmount(REFRACTIVE_INDEX_INSIDE, REFRACTIVE_INDEX_OUTSIDE, rd, n);
-//        float refract_factor = 1.0 - reflect_factor;
-//        
-//        // add in refraction outside of the object
-//        vec3 refracted_rd = refract(rd, n, REFRACTIVE_INDEX_INSIDE / REFRACTIVE_INDEX_OUTSIDE);
-//        ret += renderReflection(p + refracted_rd * 0.001, refracted_rd) * refract_factor * multiplier * absorb;
-//        
-//        // add specular highlight based on refracted ray direction
-//        //ret += light(mat, ro, rd, p, refracted_rd) * refract_factor * multiplier * absorb; 
-//        
-//        // follow the ray down the internal reflection path.
-//        rd = reflect(rd, n);
-//        
-//        // move the ray slightly down the reflect path
-//        ro = p + rd * 0.001;
-//        
-//        // For reflection, we are only going to be reflecting what is refracted on further bounces.
-//        // So, we just need to make sure the next bounce is added in at the reflect_factor amount, recursively.
-//		multiplier *= reflect_factor;        
-//    }
-//    
-//    // return the color we calculated
-//    return ret;	
+		// render scene
+		vec3 ref = reflect(rd, n);
+		color += light(sd.mat, ro, ref, p, n);
+		
+		// refract
+		float ior = invert < 0. ? REFRACTIVE_INDEX_INSIDE : 1. / REFRACTIVE_INDEX_INSIDE;
+		vec3 raf = refract(rd, n, ior);
+		bool tif = raf == vec3(0); // total internal reflection
+		rd = tif ? ref : raf;
+		ro = p + rd * (0.01 / abs(dot(rd, n))); // fixing reflections at sharp angles
+		invert = tif ? invert : invert * -1.0;
+	}
+	return color * exp(-OBJECT_ABSORB * absorb_dist); // beer's law absorption
 }
 
 // ro - ray origin
