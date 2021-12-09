@@ -40,8 +40,8 @@ SdResult sceneSDF(vec3 p)
 	//SdResult dist0 = SdResult(mandelbulb(transformRS1(p - vec3(0, 2, 0), vec3(180, u_time * 2, 0), 1.5), c) * 1.5, green);
 	SdResult dist0 = SdResult(mengersponge(transformR(p - vec3(0, 3, 0), vec3(180, u_time * 2, 0))).x, mirror);
 	
-	SdResult dist1 = SdResult(sphere(vec4(3, 3, 3, 1), p), blue);
-	SdResult dist2 = SdResult(cube(vec4(0, 1, 0, 1), p), blue);
+	SdResult dist1 = SdResult(sphere(vec4(3, 1.5, 3, 1), p), blue);
+	SdResult dist2 = SdResult(cube(vec4(-2.5, 1.5, 0, 1), p), blue);
 	SdResult dist3 = SdResult(plane(p), floorMat(p));
 	return sminCubic(dist0, sminCubic(sminCubic(dist1, dist2, 0.5), dist3, 0.5), 0.33);
 }
@@ -201,14 +201,15 @@ vec3 renderRefraction(in vec3 ro, in vec3 rd)
 		else
 			sd = castRayD(ro, rd);
 		
-		if (invert > 0.0)
-			absorb_dist += sd.dist;
+		if (invert < 0.0) // inside transparent object
+			absorb_dist += sd.dist; // darkening transparent object
 		
 		// render background
 		if (sd.dist < 0.0)
 		{
+			// if ray is outside transparent object
 			if (invert > 0.0)
-				absorb_dist = ZFAR;
+				color += background(ro, rd);
 			break;
 		}
 	
@@ -222,7 +223,7 @@ vec3 renderRefraction(in vec3 ro, in vec3 rd)
 		color += light(sd.mat, ro, ref, p, n);
 		
 		// refract
-		float ior = invert < 0. ? REFRACTIVE_INDEX_INSIDE : 1. / REFRACTIVE_INDEX_INSIDE;
+		float ior = invert < 0.0 ? REFRACTIVE_INDEX_INSIDE : 1.0 / REFRACTIVE_INDEX_INSIDE;
 		vec3 raf = refract(rd, n, ior);
 		bool tif = raf == vec3(0); // total internal reflection
 		rd = tif ? ref : raf;
