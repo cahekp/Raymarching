@@ -4,14 +4,14 @@
 #define USE_MATERIAL_SPECULAR		// vec3 specular;
 #define USE_MATERIAL_SHININESS		// float shininess;
 #define USE_MATERIAL_REFLECTIVITY	// float reflectivity;
-#define USE_MATERIAL_REFRACTIVITY	// float refractivity;
+#define USE_MATERIAL_TRANSPARENCY	// float transparency; vec3 absorption; float refraction_index;
 #define ALLOW_MATERIAL_BLENDING		// smin() affects the material also
 #include "common.frag"
 
-const Material red = Material(vec3(0.2, 0.02, 0.02), vec3(0.04, 0.02, 0.02), 32.0, 0.0, 0.0);
-const Material green = Material(vec3(0.02, 0.2, 0.02), vec3(0.02, 0.04, 0.02), 32.0, 0.0, 0.0);
-const Material blue = Material(vec3(0.02, 0.02, 0.2), vec3(0.02, 0.02, 0.04), 32.0, 0.25, 1.0);
-const Material mirror = Material(vec3(0.1), vec3(0.09), 64., 0.15, 0.0);
+const Material red = Material(vec3(0.2, 0.02, 0.02), vec3(0.04, 0.02, 0.02), 32.0, 0.0, 0.0, vec3(0), 1.0);
+const Material green = Material(vec3(0.02, 0.2, 0.02), vec3(0.02, 0.04, 0.02), 32.0, 0.0, 0.0, vec3(0), 1.0);
+const Material blue = Material(vec3(0.02, 0.02, 0.2), vec3(0.02, 0.02, 0.04), 32.0, 1.0, 1.0, vec3(2.0, 2.0, 0.75) * 0.2, 1.52);
+const Material mirror = Material(vec3(0.1), vec3(0.09), 64., 0.25, 0.0, vec3(0), 1.0);
 Material floorMat(vec3 pos)
 {
     vec3 white = vec3(0.3);
@@ -23,7 +23,7 @@ Material floorMat(vec3 pos)
     float tile = min(max(tile2D.x, tile2D.y), max(1.-tile2D.x,1.-tile2D.y)); // Fuzzy xor.
     vec3 color = mix(white, black, tile);
     
-    return Material(color,vec3(0.03), 128.0, 0.0, 0.0);
+    return Material(color,vec3(0.03), 128.0, 0.0, 0.0, vec3(0), 1.0);
 }
 
 /**
@@ -87,12 +87,6 @@ vec3 background(vec3 ro, vec3 rd)
 	return applyScattering(color, ro, ro + rd * ZFAR, vec3(0.34, 0.435, 0.57), vec3(2.0), vec3(2.0));
 }
 
-// refractive index of common materials:
-// https://en.wikipedia.org/wiki/List_of_refractive_indices
-#define REFRACTIVE_INDEX_OUTSIDE 1.00029 // air
-#define REFRACTIVE_INDEX_INSIDE  1.5 //1.333 // water
-#define OBJECT_ABSORB       vec3(2.0, 2.0, 0.75) * 0.2 // for beers law
-
 // n1 - outside refractive index
 // n2 - inside refractive index
 // reflectivity - 1 = mirror, reflect only, 0 = depends on angles only
@@ -125,13 +119,54 @@ float fresnelReflection(float n1, float n2, vec3 normal, vec3 incident, float re
 	return r;
 }
 
+// n1 - air
+// short version of the full fresnelReflection() function
+float fresnelReflection(float n2, vec3 normal, vec3 incident, float reflectivity)
+{
+	// schlick (fast approximation of the Fresnel Factor)
+	// r0 - reflectance for zero angle
+	float r0 = (1.0 - n2) / (1.0 + n2);
+	r0 *= r0;
+	float x = 1.0 + dot(normal, incident);
+	float r = r0 + (1.0 - r0) * x * x * x * x * x;
+
+	// adjust reflect multiplier for object reflectivity
+	r = (1.0 - reflectivity) * r + reflectivity;
+	return r;
+}
+
 // very simple approximation of the Fresnel equations
 float fresnelReflectionSimple(vec3 normal, vec3 incident)
 {
     return 1.0 - abs(dot(normal, incident));
 }
 
+// very simple approximation of the Fresnel equations (with exponent control, default: 5.0)
+float fresnelReflectionSimple(vec3 normal, vec3 incident, float exponent)
+{
+	return pow(clamp(1.0 + dot(normal, incident), 0.0, 1.0), exponent);
+}
+
 #define MAX_REFLECTIONS 1
+#if MAX_REFLECTIONS == 1
+vec3 renderReflection(in vec3 ro, in vec3 rd, float reflectivity = 0.0)
+{
+	SdResult sd = castRayD(ro, rd); // TODO: change to simple version
+	if (sd.dist > 0.0) // render scene
+	{
+		// p - ray-surface intersection point
+		// n - normal of the surface
+		vec3 p = ro + rd * sd.dist;
+		vec3 n = getNormalFast(p);
+		
+        return light(sd.mat, ro, rd, p, n);
+	}
+	else // render background (for example: skybox or gradient)
+	{
+		return background(ro, rd);
+	}	
+}
+#else
 vec3 renderReflection(in vec3 ro, in vec3 rd, float reflectivity)
 {
 	vec3 color = vec3(0);
@@ -161,34 +196,17 @@ vec3 renderReflection(in vec3 ro, in vec3 rd, float reflectivity)
 			break;
 		}
 	}
-    return color;	
-	
-	// SINGLE REFLECTION
-	//SdResult sd = castRayD(ro, rd);
-	//if (sd.dist > 0.0) // render scene
-	//{
-	//	// p - ray-surface intersection point
-	//	// n - normal of the surface
-	//	vec3 p = ro + rd * sd.dist;
-	//	vec3 n = getNormalFast(p);
-	//	
-	//	// light the surface
-	//	vec3 color = light(sd.mat, ro, rd, p, n);
-    //    return color;
-	//}
-	//else // render background (for example: skybox or gradient)
-	//{
-	//	return background(ro, rd);
-	//}	
+    return color;
 }
+#endif
 
-#define MAX_REFRACTION 3
-vec3 renderRefraction(in vec3 ro, in vec3 rd)
+#define MAX_REFRACTIONS 4
+vec3 renderRefraction(in vec3 ro, in vec3 rd, in vec3 absorption)
 {
 	vec3 color = vec3(0);
 	float invert = -1.0; // -1.0 - inside the object, 1.0 - outside
 	float absorb_dist = 0.0;
-	for (int i = 0; i < MAX_REFRACTION; i++)
+	for (int i = 0; i < MAX_REFRACTIONS; i++)
 	{
 		SdResult sd;
 		if (invert < 0.0)
@@ -220,14 +238,14 @@ vec3 renderRefraction(in vec3 ro, in vec3 rd)
 			break;
 		
 		// refract
-		float ior = invert < 0.0 ? REFRACTIVE_INDEX_INSIDE : 1.0 / REFRACTIVE_INDEX_INSIDE;
+		float ior = invert < 0.0 ? sd.mat.refraction_index : 1.0 / sd.mat.refraction_index;
 		vec3 raf = refract(rd, n, ior);
 		bool tif = raf == vec3(0); // total internal reflection
 		rd = tif ? ref : raf;
 		ro = p + rd * (0.01 / abs(dot(rd, n))); // fixing reflections at sharp angles
 		invert = tif ? invert : invert * -1.0;
 	}
-	return color * exp(-OBJECT_ABSORB * absorb_dist); // beer's law absorption
+	return color * exp(-absorption * absorb_dist); // beer's law absorption
 }
 
 // ro - ray origin
@@ -246,8 +264,8 @@ vec3 render(in vec3 ro, in vec3 rd)
 		// light the surface
 		vec3 color = light(sd.mat, ro, rd, p, n);
 		
-        // calculate balance between reflection and transmission (diffuse or refract)
-        float reflect_factor = fresnelReflection(REFRACTIVE_INDEX_OUTSIDE, REFRACTIVE_INDEX_INSIDE, n, rd, 0.0);
+        // calculate balance between reflection and transmission
+        float reflect_factor = fresnelReflection(sd.mat.refraction_index, n, rd, sd.mat.transparency > 0 ? 0.0 : sd.mat.reflectivity);
         float refract_factor = 1.0 - reflect_factor;
         
         // get reflection color
@@ -260,8 +278,8 @@ vec3 render(in vec3 ro, in vec3 rd)
         // get refraction color
 		if (sd.mat.transparency > 0)
 		{
-			vec3 refracted_rd = refract(rd, n, 1.0 / REFRACTIVE_INDEX_INSIDE);
-			color += renderRefraction(p + refracted_rd * 0.001, refracted_rd) * refract_factor * sd.mat.transparency;
+			vec3 refracted_rd = refract(rd, n, 1.0 / sd.mat.refraction_index);
+			color += renderRefraction(p + refracted_rd * 0.001, refracted_rd, sd.mat.absorption) * refract_factor * sd.mat.transparency;
 		}
         
         return color;
@@ -271,50 +289,6 @@ vec3 render(in vec3 ro, in vec3 rd)
 		return background(ro, rd);
 	}
 }
-
-// TODO: move render() to common.frag
-//const float REFLECTION_EPS = 0.001;
-//const int MAX_REFLECTIONS = 3; // Maximum number of reflections. Total number of casts = 1+MAX_REFLECTIONS
-//
-//// ro - ray origin
-//// rd - ray direction
-//// return: color of the intersection
-//vec3 render(in vec3 ro, in vec3 rd)
-//{
-//	vec3 color = vec3(0);
-//    float transmittance = 1.0;
-//	
-//	for (int i = 0; i <= MAX_REFLECTIONS; i++)
-//	{
-//		// find intersection point and its normal
-//		SdResult sd = castRayD(ro, rd);
-//		if (sd.dist > 0.0)
-//		{
-//			vec3 p = ro + rd * sd.dist;
-//			vec3 n = getNormalFast(p);
-//			
-//			color += transmittance * light(sd.mat, ro, rd, p, n);
-//			transmittance *= pow(sd.mat.reflectivity, 2.0);
-//			if (transmittance < REFLECTION_EPS)
-//				break;
-//
-//			// prepare for the next reflection iteration
-//			ro = p + n * 0.001;
-//			rd = reflect(rd, n);
-//		}
-//		else
-//		{
-//			// skybox
-//			vec3 skyLight = vec3(0.4, 0.4, 0.8);
-//            vec3 skyDark = vec3(0.1, 0.1, 0.4);
-//            vec3 skyColor = mix(skyDark, skyLight, rd.y);
-//			color += transmittance * applyScattering(color, ro, ro + rd * ZFAR, vec3(0.34, 0.435, 0.57), vec3(2.0), vec3(2.0));
-//			break;
-//		}
-//	}
-//	
-//    return color;
-//}
 
 // NO AA
 void main()

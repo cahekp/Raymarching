@@ -27,27 +27,25 @@ struct Material
 	float reflectivity;
 	
 	float transparency;
-	//vec3 absorption;
-	
-//	float fR0; // 0.0 - water, 1.0 - mirror
-//	float transparency;
-//	float refraction;
+	vec3 absorption;
+	float refraction_index; // 1.0 - air, 1.33 - water, 1.52 - glass
+	// refractive index of common materials: https://en.wikipedia.org/wiki/List_of_refractive_indices
 };
 
 Material blendMaterial(Material a, Material b, float k)
 {
-	//return k < 0.5 ? a : b;
-	
+#ifdef ALLOW_MATERIAL_BLENDING	
     return Material(
         mix(a.diffuse, b.diffuse, k),
         mix(a.specular, b.specular, k),
         mix(a.shininess, b.shininess, k),
         mix(a.reflectivity, b.reflectivity, k),
-		mix(a.transparency, b.transparency, k)
-		
-//		mix(a.fR0, b.fR0, k),
-//		mix(a.transparency, b.transparency, k),
-//		mix(a.refraction, b.refraction, k)
+		mix(a.transparency, b.transparency, k),
+		mix(a.absorption, b.absorption, k),
+		mix(a.refraction_index, b.refraction_index, k)
+#else
+		return k < 0.5 ? a : b;
+#endif
     );
 }
 
