@@ -36,6 +36,8 @@ struct Material
 
 Material blendMaterial(Material a, Material b, float k)
 {
+	//return k < 0.5 ? a : b;
+	
     return Material(
         mix(a.diffuse, b.diffuse, k),
         mix(a.specular, b.specular, k),
@@ -1153,6 +1155,11 @@ vec3 computeCameraRay (vec3 eye, vec3 target, vec2 uv) {
 //	vec3 rayDirection = vec3(0.0, 0.0, -1.0);
 //	rayDirection.yz *= rot(-uv.y * curve_coeff);
 //	rayDirection.xz *= rot(uv.x * curve_coeff);
+//
+//// FISHEYE, 2nd version
+//// Unit direction ray. The last term is one of many ways to fish-lens the camera.
+//// For a regular view, set "rd.z" to something like "0.5."
+//// vec3 rd = normalize(vec3(uv, (1.-dot(uv, uv)*.5)*.5)); // Fish lens, for that 1337, but tryhardish, demo look. :)
 //	
 //	// rotate camera
 //	rayDirection.yz *= rot(-u_mouse.y);

@@ -10,7 +10,7 @@
 
 const Material red = Material(vec3(0.2, 0.02, 0.02), vec3(0.04, 0.02, 0.02), 32.0, 0.0, 0.0);
 const Material green = Material(vec3(0.02, 0.2, 0.02), vec3(0.02, 0.04, 0.02), 32.0, 0.0, 0.0);
-const Material blue = Material(vec3(0.02, 0.02, 0.2), vec3(0.02, 0.02, 0.04), 32.0, 0.0, 1.0);
+const Material blue = Material(vec3(0.02, 0.02, 0.2), vec3(0.02, 0.02, 0.04), 32.0, 0.25, 1.0);
 const Material mirror = Material(vec3(0.1), vec3(0.09), 64., 0.15, 0.0);
 Material floorMat(vec3 pos)
 {
@@ -91,49 +91,44 @@ vec3 background(vec3 ro, vec3 rd)
 // https://en.wikipedia.org/wiki/List_of_refractive_indices
 #define REFRACTIVE_INDEX_OUTSIDE 1.00029 // air
 #define REFRACTIVE_INDEX_INSIDE  1.5 //1.333 // water
-#define OBJECT_DIFFUSE      vec3(0.0)
-#define OBJECT_SPECPOWER    0.0
-#define OBJECT_REFLECTIVITY 0.01 // How reflective the object is. regardless of fresnel.
 #define OBJECT_ABSORB       vec3(2.0, 2.0, 0.75) * 0.2 // for beers law
 
+// n1 - outside refractive index
+// n2 - inside refractive index
+// reflectivity - 1 = mirror, reflect only, 0 = depends on angles only
+// https://en.wikipedia.org/wiki/Fresnel_equations
 // http://en.wikipedia.org/wiki/Schlick's_approximation
-float Schlick( const in vec3 vHalf, const in vec3 vView, const in float fR0, const in float fSmoothFactor)
+// https://graphicscompendium.com/raytracing/11-fresnel-beer
+float fresnelReflection(float n1, float n2, vec3 normal, vec3 incident, float reflectivity)
 {
-    float fDot = dot(vHalf, -vView);
-    fDot = clamp((1.0 - fDot), 0.0, 1.0);
-    float fDotPow = pow(fDot, 5.0);
-    return fR0 + (1.0 - fR0) * fDotPow * fSmoothFactor;
-}
-
-vec3 ApplyFresnel(const in vec3 vDiffuse, const in vec3 vSpecular, const in vec3 vNormal, const in vec3 vView, in float fR0, float fSmoothness)
-{
-	vec3 vReflect = reflect(vView, vNormal);
-	vec3 vHalf = normalize(vReflect + -vView);
-    float fFresnel = Schlick(vHalf, vView, fR0, fSmoothness * 0.9 + 0.1);
-    return mix(vDiffuse, vSpecular, fFresnel);
-}
-
-float fresnelReflectAmount(float n1, float n2, vec3 normal, vec3 incident)
-{
-	// schlick aproximation
-	float r0 = (n1 - n2) / (n1 + n2);
-	r0 *= r0;
+	// calc cosine of incident angle
 	float cosX = -dot(normal, incident);
 	if (n1 > n2)
 	{
 		float n = n1 / n2;
 		float sinT2 = n * n * (1.0 - cosX * cosX);
-		// total internal reflection
-		if (sinT2 > 1.0)
+		if (sinT2 > 1.0) // total internal reflection
 			return 1.0;
 		cosX = sqrt(1.0 - sinT2);
 	}
+
+	// schlick (fast approximation of the Fresnel Factor)
+	// r0 - reflectance for zero angle
+	float r0 = (n1 - n2) / (n1 + n2);
+	r0 *= r0;
 	float x = 1.0 - cosX;
-	float ret = r0 + (1.0 - r0) * x * x * x * x * x;
+	float r = r0 + (1.0 - r0) * x * x * x * x * x;
+	//        r0 + (1.0 - r0) * pow(1.0 - cosX, 5.0) * smooth_factor;
 
 	// adjust reflect multiplier for object reflectivity
-	ret = (1.0 - OBJECT_REFLECTIVITY) * ret + OBJECT_REFLECTIVITY;
-	return ret;
+	r = (1.0 - reflectivity) * r + reflectivity;
+	return r;
+}
+
+// very simple approximation of the Fresnel equations
+float fresnelReflectionSimple(vec3 normal, vec3 incident)
+{
+    return 1.0 - abs(dot(normal, incident));
 }
 
 #define MAX_REFLECTIONS 1
@@ -221,6 +216,8 @@ vec3 renderRefraction(in vec3 ro, in vec3 rd)
 		// render scene
 		vec3 ref = reflect(rd, n);
 		color += light(sd.mat, ro, ref, p, n);
+		if (invert > 0.0)
+			break;
 		
 		// refract
 		float ior = invert < 0.0 ? REFRACTIVE_INDEX_INSIDE : 1.0 / REFRACTIVE_INDEX_INSIDE;
@@ -250,21 +247,21 @@ vec3 render(in vec3 ro, in vec3 rd)
 		vec3 color = light(sd.mat, ro, rd, p, n);
 		
         // calculate balance between reflection and transmission (diffuse or refract)
-        float reflect_factor = fresnelReflectAmount(REFRACTIVE_INDEX_OUTSIDE, REFRACTIVE_INDEX_INSIDE, rd, n);
+        float reflect_factor = fresnelReflection(REFRACTIVE_INDEX_OUTSIDE, REFRACTIVE_INDEX_INSIDE, n, rd, 0.0);
         float refract_factor = 1.0 - reflect_factor;
         
         // get reflection color
 		if (sd.mat.reflectivity > 0)
 		{
 			vec3 reflected_rd = reflect(rd, n);
-			color += renderReflection(p + reflected_rd * 0.001, reflected_rd, sd.mat.reflectivity) * reflect_factor;
+			color += renderReflection(p + reflected_rd * 0.001, reflected_rd, sd.mat.reflectivity) * reflect_factor * sd.mat.reflectivity;
 		}
         
         // get refraction color
 		if (sd.mat.transparency > 0)
 		{
 			vec3 refracted_rd = refract(rd, n, 1.0 / REFRACTIVE_INDEX_INSIDE);
-			color += renderRefraction(p + refracted_rd * 0.001, refracted_rd);// * refract_factor;
+			color += renderRefraction(p + refracted_rd * 0.001, refracted_rd) * refract_factor * sd.mat.transparency;
 		}
         
         return color;
