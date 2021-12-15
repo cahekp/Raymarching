@@ -60,11 +60,64 @@ vec4 fxaa(sampler2D tex, vec2 fragCoord, vec2 resolution)
     return color;
 }
 
+// - TONEMAPPING --------------------------------------------------------------------------
+// useful link about tonemapping: https://64.github.io/tonemapping/
+
+// https://knarkowicz.wordpress.com/2016/01/06/aces-filmic-tone-mapping-curve/
+vec3 tonemapACES(vec3 x)
+{
+    float a = 2.51;
+    float b = 0.03;
+    float c = 2.43;
+    float d = 0.59;
+    float e = 0.14;
+    return (x * (a * x + b)) / (x * (c * x + d) + e);
+}
+
+vec3 tonemapReinhard(vec3 c)
+{
+	return c / (c + 1.0);
+}
+
+vec3 tonemapReinhardJodie(vec3 c)
+{
+    float l = dot(c, vec3(0.2126, 0.7152, 0.0722)); // luminance
+    vec3 tc = c / (c + 1.0); // reinhard
+
+    return mix(c / (l + 1.0), tc, tc);
+}
+
+// - CHROMATIC ABERRATIONS ----------------------------------------------------------------
+
+vec3 chromaticAberration(sampler2D t, vec2 UV)
+{
+	vec2 uv = 1.0 - 2.0 * UV;
+	vec3 c = vec3(0);
+	float rf = 1.0;
+	float gf = 1.0;
+    float bf = 1.0;
+	float f = 1.0 / 8.0;
+	for(int i = 0; i < 8; ++i){
+		c.r += f*texture(t, 0.5-0.5*(uv*rf) ).r;
+		c.g += f*texture(t, 0.5-0.5*(uv*gf) ).g;
+		c.b += f*texture(t, 0.5-0.5*(uv*bf) ).b;
+		rf *= 0.9972;
+		gf *= 0.998;
+        bf /= 0.9988;
+		c = clamp(c,0.0, 1.0);
+	}
+	return c;
+}
+
 // ----------------------------------------------------------------------------------------
 
 void main()
 {
+	vec4 color;
+	
 	// apply antialiasing (FXAA)
 	vec2 uv = vec2(gl_TexCoord[0].x, 1.0 - gl_TexCoord[0].y);
-    gl_FragColor = fxaa(u_main_tex, uv, u_resolution);
+    color = fxaa(u_main_tex, uv, u_resolution);
+	
+	gl_FragColor = color;
 }

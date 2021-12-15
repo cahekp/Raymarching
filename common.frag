@@ -1080,27 +1080,6 @@ vec3 interlacedScan(vec3 color, vec2 uv)
 	return color;
 }
 
-// should be in another shader (post shader)
-vec3 chromaticAberration(sampler2D t, vec2 UV)
-{
-	vec2 uv = 1.0 - 2.0 * UV;
-	vec3 c = vec3(0);
-	float rf = 1.0;
-	float gf = 1.0;
-    float bf = 1.0;
-	float f = 1.0 / 8.0;
-	for(int i = 0; i < 8; ++i){
-		c.r += f*texture(t, 0.5-0.5*(uv*rf) ).r;
-		c.g += f*texture(t, 0.5-0.5*(uv*gf) ).g;
-		c.b += f*texture(t, 0.5-0.5*(uv*bf) ).b;
-		rf *= 0.9972;
-		gf *= 0.998;
-        bf /= 0.9988;
-		c = clamp(c,0.0, 1.0);
-	}
-	return c;
-}
-
 // ----------------------------------------------------------------------
 
 mat2 rot(float a) {
