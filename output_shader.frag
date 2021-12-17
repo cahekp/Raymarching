@@ -10,7 +10,7 @@
 
 const Material red = Material(vec3(0.2, 0.02, 0.02), vec3(0.04, 0.02, 0.02), 32.0, 0.0, 0.0, vec3(0), 1.0);
 const Material green = Material(vec3(0.02, 0.2, 0.02), vec3(0.02, 0.04, 0.02), 32.0, 0.0, 0.0, vec3(0), 1.0);
-const Material blue = Material(vec3(0.02, 0.02, 0.2), vec3(0.02, 0.02, 0.04), 32.0, 1.0, 1.0, vec3(2.0, 2.0, 0.75) * 0.2, 1.52);
+const Material blue = Material(vec3(0.02, 0.02, 0.2), vec3(0.02, 0.02, 0.04), 32.0, 0.0, 0.0, vec3(2.0, 2.0, 0.75) * 0.2, 1.52);
 const Material mirror = Material(vec3(0.1), vec3(0.09), 64., 0.25, 0.0, vec3(0), 1.0);
 Material floorMat(vec3 pos)
 {
@@ -40,11 +40,107 @@ SdResult sceneSDF(vec3 p)
 	//SdResult dist0 = SdResult(mandelbulb(transformRS1(p - vec3(0, 2, 0), vec3(180, u_time * 2, 0), 1.5), c) * 1.5, green);
 	SdResult dist0 = SdResult(mengersponge(transformR(p - vec3(0, 3, 0), vec3(180, u_time * 2, 0))).x, mirror);
 	
-	SdResult dist1 = SdResult(sphere(vec4(3, 1.5, 3, 1), p), blue);
-	SdResult dist2 = SdResult(cube(vec4(-2.5, 1.5, 0, 1), p), blue);
+	SdResult dist1 = SdResult(sphere(vec4(3, 2.0, 3, 1), p), blue);
+	SdResult dist2 = SdResult(cube(vec4(-5.0, 4.0, 5.0, 1), p), blue);
 	SdResult dist3 = SdResult(plane(p), floorMat(p));
 	return sminCubic(dist0, sminCubic(sminCubic(dist1, dist2, 0.5), dist3, 0.5), 0.33);
 }
+
+////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////
+
+// from Subsurface Scattering Demo by ssell: https://www.shadertoy.com/view/4tlcWj
+
+// local thickness
+
+// Dave_Hoskins hash functions (https://www.shadertoy.com/view/4djSRW)
+float Hash11(float p)
+{
+	vec3 p3  = fract(vec3(p) * 443.897);
+    p3 += dot(p3, p3.yzx + 19.19);
+    return fract((p3.x + p3.y) * p3.z);
+}
+
+vec3 hash31(float p)
+{
+   vec3 p3 = fract(vec3(p) * vec3(.1031, .1030, .0973));
+   p3 += dot(p3, p3.yzx+33.33);
+   return fract((p3.xxy+p3.yzz)*p3.zyx); 
+}
+
+vec3 Hash33(vec3 p3)
+{
+	p3 = fract(p3 * vec3(443.897, 441.423, 437.195));
+    p3 += dot(p3, p3.yxz+19.19);
+    return fract((p3.xxy + p3.yxx)*p3.zyx);
+}
+
+// Great tip from iq, see: https://www.shadertoy.com/view/4dBXz3
+vec3 MirrorVector(in vec3 v, in vec3 n)
+{
+    return v + 2.0 * n * max(0.0, -dot(n,v));
+}
+
+vec3 GenerateSampleVector(in vec3 norm, in float i)
+{
+	vec3 randDir = normalize(Hash33(norm + i));
+    return MirrorVector(randDir, norm);
+}
+
+float CalculateThickness(in vec3 pos, in vec3 norm)
+{
+	const float SSSSampleDepth       = 1.0;
+	const float SSSThicknessSamples  = 32.0;
+	const float SSSThicknessSamplesI = 0.03125;
+
+    // Perform a number of samples, accumulate thickness, and then divide by number of samples.
+    float thickness = 0.0;
+    
+    for(float i = 0.0; i < SSSThicknessSamples; ++i)
+    {
+        // For each sample, generate a random length and direction.
+        float sampleLength = Hash11(i) * SSSSampleDepth;
+        vec3 sampleDir = GenerateSampleVector(-norm, i);
+        
+        // Thickness is the SDF depth value at that sample point.
+        // Remember, internal SDF values are negative. So we add the 
+        // sample length to ensure we get a positive value.
+        thickness += sampleLength + sceneSDF(pos + (sampleDir * sampleLength)).dist;
+    }
+    
+    // Thickness on range [0, 1], where 0 is maximum thickness/density.
+    // Remember, the resulting thickness value is multipled against our 
+    // lighting during the actual SSS calculation so a value closer to 
+    // 1.0 means less absorption/brighter SSS lighting.
+    return clamp(thickness * SSSThicknessSamplesI, 0.0, 1.0);
+}
+
+float CalculateThickness2(in vec3 pos, in vec3 lightDir)
+{
+	const float SSSThicknessSamples  = 1.0;
+	const float SSSThicknessSamplesI = 1.0 / 1.0;
+	
+	float thickness_sum = 0.0;
+	for(float i = 0.0; i < SSSThicknessSamples; i++)
+    {
+		//vec3 randDir = normalize(Hash33(lightDir + i));
+		//vec3 dir = MirrorVector(lightDir, randDir);
+		//thickness_sum += castRayDI(pos, dir).dist;
+		
+		vec3 randDir = normalize(Hash33(pos + i));
+		thickness_sum += castRayDI(pos, randDir).dist;
+	}
+	return thickness_sum * SSSThicknessSamplesI;
+}
+
+float Attenuation(in vec3 toLight)
+{
+    float d = length(toLight);
+    return 1.0 / (1.0 + 1.0 * d + 1.0 * d * d);
+}
+
+////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////
 
 vec3 light(Material mat, vec3 ro, vec3 rd, vec3 p, vec3 n)
 {
@@ -71,6 +167,23 @@ vec3 light(Material mat, vec3 ro, vec3 rd, vec3 p, vec3 n)
 	shading += sky * vec3(0.16,0.20,0.28) * occ;
 	shading += ind * vec3(0.40,0.28,0.20) * occ;
 	//shading += fre * vec3(1.0,1.0,1.0) * occ;
+	
+	// SSS (subsurface scattering)
+	float SSSAmbient     = 1.0; //0.6;
+	float SSSDistortion  = 1.0; //0.6;
+	float SSSPower       = 1.0; //1.09;
+	float SSSScale       = 1.0; //0.29;	
+	float thickness = CalculateThickness2(p + rd * 0.01, lightDir); //CalculateThickness(p, n);
+	float attenuation = Attenuation(lightPos - p);
+	
+	// SSS enabled
+	vec3  toEye    = -rd;
+	vec3  SSSLight = (lightDir + n * SSSDistortion);
+	float SSSDot   = pow(clamp(dot(toEye, -SSSLight), 0.0, 1.0), SSSPower) * SSSScale;
+	float SSS      = (SSSDot + SSSAmbient) * thickness;// * attenuation;
+	//shading += SSS;
+	//shading += exp(-thickness * 1.0) * 1.0;
+	shading += thickness;
 	
 	vec3 color = mat.diffuse * shading;
 
