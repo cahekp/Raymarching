@@ -49,23 +49,12 @@ SdResult sceneSDF(vec3 p)
 ////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////
 
-// from Subsurface Scattering Demo by ssell: https://www.shadertoy.com/view/4tlcWj
-
-// local thickness
-
 // Dave_Hoskins hash functions (https://www.shadertoy.com/view/4djSRW)
 float Hash11(float p)
 {
 	vec3 p3  = fract(vec3(p) * 443.897);
     p3 += dot(p3, p3.yzx + 19.19);
     return fract((p3.x + p3.y) * p3.z);
-}
-
-vec3 hash31(float p)
-{
-   vec3 p3 = fract(vec3(p) * vec3(.1031, .1030, .0973));
-   p3 += dot(p3, p3.yzx+33.33);
-   return fract((p3.xxy+p3.yzz)*p3.zyx); 
 }
 
 vec3 Hash33(vec3 p3)
@@ -75,18 +64,23 @@ vec3 Hash33(vec3 p3)
     return fract((p3.xxy + p3.yxx)*p3.zyx);
 }
 
-// Great tip from iq, see: https://www.shadertoy.com/view/4dBXz3
-vec3 MirrorVector(in vec3 v, in vec3 n)
+// reflect the vector "v" along the plane defined by normal "n"
+// https://iquilezles.org/www/articles/dontflip/dontflip.htm
+vec3 reflectVector(in vec3 v, in vec3 n)
 {
-    return v + 2.0 * n * max(0.0, -dot(n,v));
+	return v - 2.0 * n * min(0.0, dot(v, n));
 }
 
+// generate random vector in hemsphere defined by normal vector "norm"
+// and random value "i"
 vec3 GenerateSampleVector(in vec3 norm, in float i)
 {
-	vec3 randDir = normalize(Hash33(norm + i));
-    return MirrorVector(randDir, norm);
+	vec3 randDir = normalize(Hash33(norm + i) - vec3(0.5));
+    return reflectVector(randDir, norm);
 }
 
+// calculate local thickness
+// from Subsurface Scattering Demo by ssell: https://www.shadertoy.com/view/4tlcWj
 float CalculateThickness(in vec3 pos, in vec3 norm)
 {
 	const float SSSSampleDepth       = 1.0;
@@ -113,24 +107,6 @@ float CalculateThickness(in vec3 pos, in vec3 norm)
     // lighting during the actual SSS calculation so a value closer to 
     // 1.0 means less absorption/brighter SSS lighting.
     return clamp(thickness * SSSThicknessSamplesI, 0.0, 1.0);
-}
-
-float CalculateThickness2(in vec3 pos, in vec3 lightDir)
-{
-	const float SSSThicknessSamples  = 1.0;
-	const float SSSThicknessSamplesI = 1.0 / 1.0;
-	
-	float thickness_sum = 0.0;
-	for(float i = 0.0; i < SSSThicknessSamples; i++)
-    {
-		//vec3 randDir = normalize(Hash33(lightDir + i));
-		//vec3 dir = MirrorVector(lightDir, randDir);
-		//thickness_sum += castRayDI(pos, dir).dist;
-		
-		vec3 randDir = normalize(Hash33(pos + i));
-		thickness_sum += castRayDI(pos, randDir).dist;
-	}
-	return thickness_sum * SSSThicknessSamplesI;
 }
 
 float Attenuation(in vec3 toLight)
@@ -169,21 +145,20 @@ vec3 light(Material mat, vec3 ro, vec3 rd, vec3 p, vec3 n)
 	//shading += fre * vec3(1.0,1.0,1.0) * occ;
 	
 	// SSS (subsurface scattering)
-	float SSSAmbient     = 1.0; //0.6;
-	float SSSDistortion  = 1.0; //0.6;
-	float SSSPower       = 1.0; //1.09;
-	float SSSScale       = 1.0; //0.29;	
-	float thickness = CalculateThickness2(p + rd * 0.01, lightDir); //CalculateThickness(p, n);
+	// GDC 2011 – Approximating Translucency for a Fast, Cheap and Convincing Subsurface Scattering Look:
+	// https://colinbarrebrisebois.com/2011/03/07/gdc-2011-approximating-translucency-for-a-fast-cheap-and-convincing-subsurface-scattering-look/
+	float SSSAmbient     = 0.3;
+	float SSSDistortion  = 0.6;
+	float SSSPower       = 1.1;
+	float SSSScale       = 0.3;
+	float thickness = CalculateThickness(p, n);
 	float attenuation = Attenuation(lightPos - p);
-	
-	// SSS enabled
+
 	vec3  toEye    = -rd;
-	vec3  SSSLight = (lightDir + n * SSSDistortion);
+	vec3  SSSLight = lightDir + n * SSSDistortion;
 	float SSSDot   = pow(clamp(dot(toEye, -SSSLight), 0.0, 1.0), SSSPower) * SSSScale;
 	float SSS      = (SSSDot + SSSAmbient) * thickness;// * attenuation;
-	//shading += SSS;
-	//shading += exp(-thickness * 1.0) * 1.0;
-	shading += thickness;
+	shading += SSS;
 	
 	vec3 color = mat.diffuse * shading;
 
