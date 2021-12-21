@@ -83,14 +83,19 @@ vec3 GenerateSampleVector(in vec3 norm, in float i)
 // from Subsurface Scattering Demo by ssell: https://www.shadertoy.com/view/4tlcWj
 float CalculateThickness(in vec3 pos, in vec3 norm)
 {
+	// Sample Depth [0.01, 2.0]
+	// The maximum length of the random hemispherical sampling vector into the object.
+    // Naturally, the smaller this maximum value is the denser the object will be.
 	const float SSSSampleDepth       = 1.0;
+	// Samples [1, 64]
+	// Number of samples to perform when calculating the local thickness values.
 	const float SSSThicknessSamples  = 32.0;
 	const float SSSThicknessSamplesI = 0.03125;
 
     // Perform a number of samples, accumulate thickness, and then divide by number of samples.
     float thickness = 0.0;
     
-    for(float i = 0.0; i < SSSThicknessSamples; ++i)
+	for(float i = 0.0; i < SSSThicknessSamples; ++i)
     {
         // For each sample, generate a random length and direction.
         float sampleLength = Hash11(i) * SSSSampleDepth;
@@ -147,10 +152,10 @@ vec3 light(Material mat, vec3 ro, vec3 rd, vec3 p, vec3 n)
 	// SSS (subsurface scattering)
 	// GDC 2011 – Approximating Translucency for a Fast, Cheap and Convincing Subsurface Scattering Look:
 	// https://colinbarrebrisebois.com/2011/03/07/gdc-2011-approximating-translucency-for-a-fast-cheap-and-convincing-subsurface-scattering-look/
-	float SSSAmbient     = 0.3;
-	float SSSDistortion  = 0.6;
-	float SSSPower       = 1.1;
-	float SSSScale       = 0.3;
+	float SSSAmbient     = 0.3; // [0.01, 1.0] Controls front and back translucency which is always present
+	float SSSDistortion  = 0.6; // [0.01, 2.0] How much light bends around the surface
+	float SSSPower       = 1.1; // [0.01, 2.0] Local power of scattering when in proximity to the light source
+	float SSSScale       = 0.3; // [0.01, 5.0] How much light goes through the back translucency
 	float thickness = CalculateThickness(p, n);
 	float attenuation = Attenuation(lightPos - p);
 
