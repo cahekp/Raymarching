@@ -26,6 +26,7 @@
     <ClCompile Include="include\imgui\imgui_tables.cpp" />
     <ClCompile Include="include\imgui\imgui_widgets.cpp" />
     <ClCompile Include="main.cpp" />
+    <ClCompile Include="source\post_bloom.cpp" />
     <ClCompile Include="source\shader_loader.cpp" />
   </ItemGroup>
   <ItemGroup>
@@ -40,6 +41,7 @@
     <ClInclude Include="include\imgui\imstb_rectpack.h" />
     <ClInclude Include="include\imgui\imstb_textedit.h" />
     <ClInclude Include="include\imgui\imstb_truetype.h" />
+    <ClInclude Include="source\post_bloom.h" />
     <ClInclude Include="source\shader_loader.h" />
   </ItemGroup>
   <PropertyGroup Label="Globals">

@@ -3,6 +3,7 @@
 #include <imgui/imgui-SFML.h>
 #include <SFML/Graphics.hpp>
 #include "source/shader_loader.h"
+#include "source/post_bloom.h"
 
 // math
 float clamp01(float v) { return (v < 0.0f) ? 0.0f : ((v > 1.0f) ? 1.0f : v); }
@@ -55,6 +56,9 @@ int main()
 	sf::Shader post_shader;
 	ShaderLoader::loadFromFile("post.frag", sf::Shader::Fragment, post_shader);
 	post_shader.setUniform("u_resolution", sf::Vector2f(wf, hf));
+
+	PostBloom post_bloom;
+	post_bloom.init(sf::Vector2f(wf, hf));
 
 	std::random_device rd;
 	std::mt19937 e2(rd());
@@ -127,16 +131,17 @@ int main()
 		static float smooth_fps = 60.0f;
 		smooth_fps = lerp(smooth_fps, 1 / delta_time.asSeconds(), 5.0f * delta_time.asSeconds());
 		ImGui::Text("FPS: %.1f", smooth_fps);
-		if (ImGui::Button("Reload shader"))
+		if (ImGui::Button("Reload scene shader"))
 		{
 			ShaderLoader::loadFromFile("output_shader.frag", sf::Shader::Fragment, shader);
 			shader.setUniform("u_resolution", sf::Vector2f(wf, hf));
 			firstFrame = true;
 		}
-		if (ImGui::Button("Reload post shader"))
+		if (ImGui::Button("Reload post shaders"))
 		{
 			ShaderLoader::loadFromFile("post.frag", sf::Shader::Fragment, post_shader);
 			post_shader.setUniform("u_resolution", sf::Vector2f(wf, hf));
+			post_bloom.init(sf::Vector2f(wf, hf));
 			firstFrame = true;
 		}
 		ImGui::Checkbox("Time Freeze", &time_freeze);
@@ -203,7 +208,13 @@ int main()
 
 		post_shader.setUniform("u_main_tex", framesStill % 2 == 1 ? outputTexture.getTexture() : firstTexture.getTexture());
 		postTexture.draw(postTextureSprite, &post_shader);
-		window.draw(postTextureSprite);
+		
+		//postTexture.setSmooth(true);
+		//postTexture.generateMipmap();
+
+		post_bloom.apply(postTexture.getTexture(), outputTexture, outputTextureSprite);
+		
+		window.draw(outputTextureSprite);
 
 		ImGui::SFML::Render(window);
 

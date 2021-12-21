@@ -23,6 +23,9 @@
     <ClCompile Include="source\shader_loader.cpp">
       <Filter>source</Filter>
     </ClCompile>
+    <ClCompile Include="source\post_bloom.cpp">
+      <Filter>source</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <None Include="output_shader.frag" />
@@ -64,6 +67,9 @@
       <Filter>include\imgui</Filter>
     </ClInclude>
     <ClInclude Include="source\shader_loader.h">
+      <Filter>source</Filter>
+    </ClInclude>
+    <ClInclude Include="source\post_bloom.h">
       <Filter>source</Filter>
     </ClInclude>
   </ItemGroup>
