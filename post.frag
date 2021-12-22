@@ -87,6 +87,27 @@ vec3 tonemapReinhardJodie(vec3 c)
     return mix(c / (l + 1.0), tc, tc);
 }
 
+vec3 tonemapUncharted2Partial(vec3 x)
+{
+    float A = 0.15f;
+    float B = 0.50f;
+    float C = 0.10f;
+    float D = 0.20f;
+    float E = 0.02f;
+    float F = 0.30f;
+    return ((x*(A*x+C*B)+D*E)/(x*(A*x+B)+D*F))-E/F;
+}
+
+vec3 tonemapUncharted2Filmic(vec3 v)
+{
+    float exposure_bias = 2.0f;
+    vec3 curr = tonemapUncharted2Partial(v * exposure_bias);
+
+    vec3 W = vec3(11.2f);
+    vec3 white_scale = vec3(1.0f) / tonemapUncharted2Partial(W);
+    return curr * white_scale;
+}
+
 // - CHROMATIC ABERRATIONS ----------------------------------------------------------------
 
 vec3 chromaticAberration(sampler2D t, vec2 UV)
