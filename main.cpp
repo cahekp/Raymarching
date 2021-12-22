@@ -209,9 +209,8 @@ int main()
 		post_shader.setUniform("u_main_tex", framesStill % 2 == 1 ? outputTexture.getTexture() : firstTexture.getTexture());
 		postTexture.draw(postTextureSprite, &post_shader);
 		
-		//postTexture.setSmooth(true);
-		//postTexture.generateMipmap();
-
+		postTexture.setSmooth(true); // use bilinear filtering
+		postTexture.generateMipmap(); // generate mip maps for simple bloom effect
 		post_bloom.apply(postTexture.getTexture(), outputTexture, outputTextureSprite);
 		
 		window.draw(outputTextureSprite);
