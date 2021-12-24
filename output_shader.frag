@@ -5,13 +5,14 @@
 #define USE_MATERIAL_SHININESS		// float shininess;
 #define USE_MATERIAL_REFLECTIVITY	// float reflectivity;
 #define USE_MATERIAL_TRANSPARENCY	// float transparency; vec3 absorption; float refraction_index;
+#define USE_MATERIAL_EMISSION		// vec3 emission;
 #define ALLOW_MATERIAL_BLENDING		// smin() affects the material also
 #include "common.frag"
 
-const Material red = Material(vec3(0.2, 0.02, 0.02), vec3(0.04, 0.02, 0.02), 32.0, 0.0, 0.0, vec3(0), 1.0);
-const Material green = Material(vec3(0.02, 0.2, 0.02), vec3(0.02, 0.04, 0.02), 32.0, 0.0, 0.0, vec3(0), 1.0);
-const Material blue = Material(vec3(0.02, 0.02, 0.2), vec3(0.02, 0.02, 0.04), 32.0, 0.0, 0.0, vec3(2.0, 2.0, 0.75) * 0.2, 1.52);
-const Material mirror = Material(vec3(0.1), vec3(0.09), 64., 0.25, 0.0, vec3(0), 1.0);
+const Material red = Material(vec3(0.2, 0.02, 0.02), vec3(0.04, 0.02, 0.02), 32.0, 0.0, 0.0, vec3(0), 1.0, vec3(0));
+const Material green = Material(vec3(0.02, 0.2, 0.02), vec3(0.02, 0.04, 0.02), 32.0, 0.0, 0.0, vec3(0), 1.0, vec3(0));
+const Material blue = Material(vec3(0.02, 0.02, 0.2), vec3(0.02, 0.02, 0.04), 32.0, 0.0, 0.0, vec3(2.0, 2.0, 0.75) * 0.2, 1.52, vec3(0.0,0.0,100.0));
+const Material mirror = Material(vec3(0.1), vec3(0.09), 64., 0.25, 0.0, vec3(0), 1.0, vec3(0));
 Material floorMat(vec3 pos)
 {
     vec3 white = vec3(0.3);
@@ -23,7 +24,7 @@ Material floorMat(vec3 pos)
     float tile = min(max(tile2D.x, tile2D.y), max(1.-tile2D.x,1.-tile2D.y)); // Fuzzy xor.
     vec3 color = mix(white, black, tile);
     
-    return Material(color,vec3(0.03), 128.0, 0.0, 0.0, vec3(0), 1.0);
+    return Material(color,vec3(0.03), 128.0, 0.0, 0.0, vec3(0), 1.0, vec3(0));
 }
 
 /**
@@ -165,7 +166,7 @@ vec3 light(Material mat, vec3 ro, vec3 rd, vec3 p, vec3 n)
 	float SSS      = (SSSDot + SSSAmbient) * thickness;// * attenuation;
 	shading += SSS;
 	
-	vec3 color = mat.diffuse * shading;
+	vec3 color = mat.diffuse * shading + mat.emission;
 
 	// add fog/haze
 	//color = applyFog(color, ro, p, vec3(0.34, 0.435, 0.57));

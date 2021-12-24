@@ -30,6 +30,8 @@ struct Material
 	vec3 absorption;
 	float refraction_index; // 1.0 - air, 1.33 - water, 1.52 - glass
 	// refractive index of common materials: https://en.wikipedia.org/wiki/List_of_refractive_indices
+	
+	vec3 emission;
 };
 
 Material blendMaterial(Material a, Material b, float k)
@@ -42,7 +44,8 @@ Material blendMaterial(Material a, Material b, float k)
         mix(a.reflectivity, b.reflectivity, k),
 		mix(a.transparency, b.transparency, k),
 		mix(a.absorption, b.absorption, k),
-		mix(a.refraction_index, b.refraction_index, k)
+		mix(a.refraction_index, b.refraction_index, k),
+		mix(a.emission, b.emission, k)
 #else
 		return k < 0.5 ? a : b;
 #endif
